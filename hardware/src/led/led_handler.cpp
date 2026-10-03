@@ -61,6 +61,13 @@ constexpr LedStep kSoundFailPattern[] = {
     {false, 700},
 };
 
+constexpr LedStep kBLEFailPattern[] = {
+    {true, 600},
+    {false, 200},
+    {true, 100},
+    {false, 700},
+};
+
 constexpr LedStep kIdlePattern[] = {
     {true, 50},
     {false, 1950},
@@ -142,6 +149,8 @@ LedPatternRunner setupRunner = {};
 LedPatternRunner imuFailRunner = {};
 /** @brief Runner for BlinkState::SoundFail. */
 LedPatternRunner soundFailRunner = {};
+/** @brief Runner for BlinkState::BLEFail. */
+LedPatternRunner bleFailRunner = {};
 /** @brief Runner for BlinkState::Idle. */
 LedPatternRunner idleRunner = {};
 /** @} */ // end of LedPatternRunner Instances
@@ -163,6 +172,8 @@ LedPatternRunner* getRunnerByState(BlinkState state) {
             return &imuFailRunner;
         case BlinkState::SoundFail:
             return &soundFailRunner;
+        case BlinkState::BLEFail:
+            return &bleFailRunner;
         case BlinkState::Idle:
             return &idleRunner;
         default:
@@ -246,6 +257,7 @@ void resetPatterns(unsigned long offsetMs = 0) {
     setupRunner.resetPatternState(offsetMs);
     imuFailRunner.resetPatternState(offsetMs);
     soundFailRunner.resetPatternState(offsetMs);
+    bleFailRunner.resetPatternState(offsetMs);
     idleRunner.resetPatternState(offsetMs);
 }
 
@@ -324,6 +336,11 @@ bool startStatusLED() {
     soundFailRunner.maxLogging = 1;
     soundFailRunner.name = "SoundFail";
 
+    bleFailRunner.pattern = makePatternView(kBLEFailPattern);
+    bleFailRunner.logMessage = "BLE failed to start.";
+    bleFailRunner.maxLogging = 1;
+    bleFailRunner.name = "BLEFail";
+
     idleRunner.pattern = makePatternView(kIdlePattern);
     idleRunner.logMessage = "Device is idle.";
     idleRunner.maxLogging = 1;
@@ -357,6 +374,7 @@ bool updateStatusLED() {
 bool inFailedState() {
     return
     currentState == BlinkState::IMUFail ||
-    currentState == BlinkState::SoundFail;
+    currentState == BlinkState::SoundFail ||
+    currentState == BlinkState::BLEFail;
 }
 /** @} */ // end of Public

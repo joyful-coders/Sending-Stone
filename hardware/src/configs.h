@@ -89,6 +89,42 @@ inline constexpr uint8_t kThreadRefreshIntervalMs = 50;
 
 } // namespace sound_config
 
+namespace ble_config {
+/** @brief Device name shown to scanning clients (sent in the scan response). */
+inline constexpr char kDeviceName[] = "XIAO-Sensors";
+
+/** @brief UUID of the sensor data service, advertised so clients can filter scans by it. */
+inline constexpr char kServiceUuid[] = "db118277-ac3c-4312-9c3f-8f0f77e70acc";
+/** @brief UUID of the readings characteristic (READ + NOTIFY), carrying one @c SensorPacket. */
+inline constexpr char kReadingsCharUuid[] = "4f2e8c83-317d-4a69-99bc-c9006d46e64e";
+/** @brief UUID of the packet version characteristic (READ), carrying @c BLE_PACKET_VERSION. */
+inline constexpr char kVersionCharUuid[] = "48e4c40b-6e01-49f1-b99b-0e6e9bd77a16";
+
+/**
+ * @brief Interval, in milliseconds, between sensor packet notifications (BLE thread ticks).
+ *
+ * @details
+ * Defaults to the sensors' own sample interval so every sample is sent once.
+ * Shorter than that resends the same sample, longer than that skips samples.
+ *
+ * @par Options
+ * Any positive duration. Below ~15ms exceeds what most BLE connection
+ * intervals can deliver and notifications will queue or drop.
+ *
+ */
+inline constexpr uint16_t kNotifyIntervalMs = imu_config::kThreadRefreshIntervalMs;
+
+/**
+ * @brief Transmit power, in dBm, used for advertising and connections.
+ *
+ * @par Options
+ * -12 to +9 on the ESP32-C6. Lower saves power, higher extends range.
+ *
+ */
+inline constexpr int8_t kTxPowerDbm = 9;
+
+} // namespace ble_config
+
 namespace debug_config {
 /** @brief When true, the onboard status LED reflects device state. */
 inline constexpr bool kEnableStatusLight = true;
@@ -126,5 +162,12 @@ inline constexpr bool kEnableSoundLogging = true && kEnableVerboseLogging;
 inline constexpr const char* kSoundPrefix = "[Sound]";
 /** @brief Interval, in milliseconds, between periodic sound reading logs. */
 inline constexpr unsigned long kSoundLoopDelay = 1UL * 1UL * 500UL; // 0.5 seconds
+
+/** @brief Enables BLE module log messages. */
+inline constexpr bool kEnableBLELogging = true && kEnableVerboseLogging;
+/** @brief Prefix prepended to BLE module log messages. */
+inline constexpr const char* kBLEPrefix = "[BLE]";
+/** @brief Interval, in milliseconds, between periodic BLE status logs. */
+inline constexpr unsigned long kBLELoopDelay = 1UL * 5UL * 1000UL; // 5 seconds
 
 } // namespace debug_config

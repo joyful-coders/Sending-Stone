@@ -15,6 +15,8 @@ enum class BlinkState : int8_t {
 	IMUFail,
 	/** @brief The sound sensor failed to initialize. */
 	SoundFail,
+	/** @brief The BLE stack, GATT server, or advertising failed to start. */
+	BLEFail,
 	/** @brief Every module started successfully, device is running normally. */
 	Idle,
 };

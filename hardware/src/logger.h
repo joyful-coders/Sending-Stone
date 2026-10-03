@@ -150,5 +150,6 @@ inline bool flushLogs(const char *separator = "---------------------------------
     DEFINE_LOGGER(ledLogging,   debug_config::kEnableLEDLogging,   debug_config::kLEDPrefix)
     DEFINE_LOGGER(imuLogging,   debug_config::kEnableIMULogging,   debug_config::kIMUPrefix)
     DEFINE_LOGGER(soundLogging, debug_config::kEnableSoundLogging, debug_config::kSoundPrefix)
+    DEFINE_LOGGER(bleLogging,   debug_config::kEnableBLELogging,   debug_config::kBLEPrefix)
 #undef DEFINE_LOGGER
 } // namespace debug_logs

@@ -5,11 +5,12 @@
  *
  * @details
  * @c setup() brings up serial logging, then the status LED, then the IMU
- * (MPU6050) and sound sensor modules. Any failure along the way is reflected
- * on the status LED, and @c setup() blocks on that failed state before falling
- * through to the idle pattern. @c loop() then ticks the status LED, IMU, and
- * sound modules once per iteration and periodically flushes queued debug logs
- * via @c debug_logs::flushLogs().
+ * (MPU6050) and sound sensor modules, then BLE, which streams both sensors'
+ * readings to connected clients. Any failure along the way is reflected on the
+ * status LED, and @c setup() blocks on that failed state before falling
+ * through to the idle pattern. @c loop() then ticks the status LED, IMU,
+ * sound, and BLE modules once per iteration and periodically flushes queued
+ * debug logs via @c debug_logs::flushLogs().
  *
  */
 
@@ -20,6 +21,7 @@
 #include "led/led_handler.h"
 #include "imu/imu.h"
 #include "sound/sound.h"
+#include "ble/ble.h"
 
 namespace {
 /** @brief Timestamp for adding debug logs for the main loop */
@@ -49,6 +51,11 @@ void setup() {
     setStatusState(BlinkState::SoundFail);
   }
 
+  // Start BLE advertising, streaming the sensor readings to connected clients.
+  if (!startBLEModule()) {
+    setStatusState(BlinkState::BLEFail);
+  }
+
   while (inFailedState()) {
     updateStatusLED();
     if (millis() - nowLoop >= debug_config::kLoopLogDelay) {
@@ -65,6 +72,7 @@ void loop() {
   updateStatusLED();
   updateIMUModule();
   updateSoundModule();
+  updateBLEModule();
 
   if (millis() - nowLoop >= debug_config::kLoopLogDelay) {
     debug_logs::flushLogs();
