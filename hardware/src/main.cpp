@@ -1,4 +1,6 @@
 #include <Arduino.h>
+#include "MPU-6050.h"
+#include "sound-sensor.h"
 
 // XIAO ESP32-C6 user LED (yellow) is on GPIO15 and is active-low.
 #define LED_PIN 15
@@ -6,16 +8,26 @@
 
 void led();
 void sound();
+void accelerometer();
 
 void setup() {
     Serial.begin(115200);
+    while (!Serial) delay(10);
+    Serial.println("Serial Started!");
+    
+    // led pin
     pinMode(LED_PIN, OUTPUT);
-    pinMode(ADC_PIN, INPUT);
+
+
+    
+
+    Serial.println("Setup Finished!");
 }
 
 void loop() {
     // led();
-    sound();
+    // sound();
+    accelerometer();
 
     delay(20);
 }
