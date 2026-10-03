@@ -1,54 +1,74 @@
+/**
+ * @file main.cpp
+ *
+ * @brief Application entry point wiring together every firmware module.
+ *
+ * @details
+ * @c setup() brings up serial logging, then the status LED, then the IMU
+ * (MPU6050) and sound sensor modules. Any failure along the way is reflected
+ * on the status LED, and @c setup() blocks on that failed state before falling
+ * through to the idle pattern. @c loop() then ticks the status LED, IMU, and
+ * sound modules once per iteration and periodically flushes queued debug logs
+ * via @c debug_logs::flushLogs().
+ *
+ */
+
 #include <Arduino.h>
-#include "MPU-6050.h"
-#include "sound-sensor.h"
 
-// XIAO ESP32-C6 user LED (yellow) is on GPIO15 and is active-low.
-#define LED_PIN 15
-#define ADC_PIN A0
+#include "configs.h"
+#include "logger.h"
+#include "led/led_handler.h"
+#include "imu/imu.h"
+#include "sound/sound.h"
 
-void led();
-void sound();
-void accelerometer();
+namespace {
+/** @brief Timestamp for adding debug logs for the main loop */
+unsigned long nowLoop = 0;
+}
 
 void setup() {
+  // Initialize serial for debug logging if enabled. Native USB only reports
+  // ready once a monitor is attached, so don't wait on it forever.
+  if (debug_config::kEnableVerboseLogging) {
     Serial.begin(115200);
-    while (!Serial) delay(10);
-    Serial.println("Serial Started!");
-    
-    // led pin
-    pinMode(LED_PIN, OUTPUT);
+    unsigned long serialStart = millis();
+    while (!Serial && millis() - serialStart < debug_config::kSerialWaitTimeoutMs) delay(10);
+  }
 
+  // The status LED runs on its own thread, indicating state without blocking other operations.
+  startStatusLED();
+  setStatusState(BlinkState::Setup);
 
-    
+  // Start the MPU6050 over I2C.
+  if (!startIMUModule()) {
+    setStatusState(BlinkState::IMUFail);
+  }
 
-    Serial.println("Setup Finished!");
+  // Start the analog sound sensor.
+  if (!startSoundModule()) {
+    setStatusState(BlinkState::SoundFail);
+  }
+
+  while (inFailedState()) {
+    updateStatusLED();
+    if (millis() - nowLoop >= debug_config::kLoopLogDelay) {
+      debug_logs::flushLogs();
+      nowLoop = millis();
+    }
+    delay(main_config::kRefreshIntervalMs);
+  }
+
+  setStatusState(BlinkState::Idle);
 }
 
 void loop() {
-    // led();
-    // sound();
-    accelerometer();
+  updateStatusLED();
+  updateIMUModule();
+  updateSoundModule();
 
-    delay(20);
-}
-
-void led(){
-    digitalWrite(LED_PIN, LOW);   // on
-    Serial.println("LED on");
-    delay(1500);
-
-    digitalWrite(LED_PIN, HIGH);  // off
-    Serial.println("LED off");
-}
-
-void sound() {
-    long sum = 0;
-    for(int i=0; i<32; i++)
-    {
-        sum += analogRead(ADC_PIN);
-    }
-
-    sum >>= 5;
-
-    Serial.println(sum);
+  if (millis() - nowLoop >= debug_config::kLoopLogDelay) {
+    debug_logs::flushLogs();
+    nowLoop = millis();
+  }
+  delay(main_config::kRefreshIntervalMs);
 }
