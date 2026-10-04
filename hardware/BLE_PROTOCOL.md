@@ -48,7 +48,7 @@ Device name: `Nicla-Sensors`. Subscribe to **Events** and **Data** before sendin
 | `0x86` | DELETED | u16 id |
 | `0x87` | ERROR | u8 code (1 bad command, 2 no such event / still recording, 3 storage error), u16 id |
 
-Trigger types: `1` keyword (detail = the model's class index), `2` jolt (detail 1 = acceleration, 2 = rotation), `3` manual.
+Trigger types: `1` keyword (detail = the model's class index), `2` jolt (detail 1 = acceleration, 2 = rotation), `3` manual (the TRIGGER command), `4` button (the wearer pressed it).
 
 ### Data chunks (notified on Data)
 

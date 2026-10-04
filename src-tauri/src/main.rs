@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    untitled_lib::run()
+    sending_stone_lib::run()
 }

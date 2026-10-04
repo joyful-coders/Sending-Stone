@@ -218,11 +218,15 @@ void setup() {
   // The I2C bus the LED driver and PMIC share. nicla::begin() isn't used: it
   // also starts a thread whose 768-byte stack comes off the heap, and BLE
   // needs every byte (see startModules()). pingPmic() replaces that thread.
-  // The header pins' LDO is unused (no external hardware), so it's turned off
-  // to save power.
+  // The PMIC's LDO powers the header pins' level shifters: on (1.8 V) for the
+  // button on GPIO0, else off to save power.
   Wire1.begin();
   nicla::started = true;
-  nicla::disableLDO();
+  if (trigger_config::kEnableButton) {
+    nicla::enable1V8LDO();
+  } else {
+    nicla::disableLDO();
+  }
   pmicPingThread.enabled = true;
 
   // The status LED (debug builds) runs on its own thread, indicating state without blocking other operations.
