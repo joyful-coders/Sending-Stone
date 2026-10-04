@@ -257,10 +257,7 @@
       <button
         type="button"
         class="rounded-2xl border border-slate-800 bg-slate-900 p-5 text-left transition hover:border-indigo-400 hover:bg-slate-800"
-        onclick={() =>
-          showPrototypeMessage(
-            'Privacy settings are a prototype. Data is currently stored locally in the app database.'
-          )}
+        onclick={() => goto('/private/privacy')}
       >
         <span class="text-2xl" aria-hidden="true">⚙️</span>
 
