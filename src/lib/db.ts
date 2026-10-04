@@ -53,10 +53,10 @@ export async function getDB() {
 }
 
 export async function addActivity(title: string, detail: string) {
-    const db = await getDB();
+    const database = await getDB();
 
-    await db.execute(
-        `INSERT INTO activity_events (title, detail) VALUES (?, ?)`,
+    await database.execute(
+        `INSERT INTO activity_events (title, detail) VALUES ($1, $2)`,
         [title, detail]
     );
 }
