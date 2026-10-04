@@ -9,6 +9,16 @@
     "sql:default",
     "sql:allow-select",
     "sql:allow-load",
-    "sql:allow-execute"
+    "sql:allow-execute",
+    "blec:default",
+    "fs:allow-appdata-read-recursive",
+    "fs:allow-appdata-write-recursive",
+    "fs:allow-exists",
+    "fs:allow-mkdir",
+    "fs:allow-read-dir",
+    "fs:allow-read-file",
+    "fs:allow-remove",
+    "fs:allow-write-file",
+    "fs:allow-write-text-file"
   ]
 }

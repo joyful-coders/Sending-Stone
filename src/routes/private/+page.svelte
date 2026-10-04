@@ -2,6 +2,16 @@
   import { goto } from '$app/navigation';
   import { onMount } from 'svelte';
   import { addActivity, getDB } from '$lib/db';
+  import { watch } from '$lib/watch/watchClient.svelte';
+
+  const watchStatusText: Record<string, string> = {
+    idle: 'Not connected',
+    scanning: 'Searching…',
+    connecting: 'Connecting…',
+    connected: 'Connected',
+    reconnecting: 'Reconnecting…',
+    error: 'Needs attention'
+  };
 
   type ActivityEvent = {
     id: number;
@@ -210,6 +220,25 @@
     </section>
 
     <section class="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <button
+        type="button"
+        class="rounded-2xl border border-slate-800 bg-slate-900 p-5 text-left transition hover:border-indigo-400 hover:bg-slate-800 sm:col-span-2"
+        onclick={() => goto('/private/watch')}
+      >
+        <span class="text-2xl" aria-hidden="true">⌚</span>
+
+        <span class="mt-4 block font-semibold">Watch</span>
+
+        <span class="mt-1 block text-sm text-slate-400">
+          {watch.device
+            ? `${watch.device.name}: ${watchStatusText[watch.status]}`
+            : 'Pair your watch to receive recordings'}
+          {#if watch.transfer}
+            • downloading a recording
+          {/if}
+        </span>
+      </button>
+
       <button
         type="button"
         class="rounded-2xl border border-slate-800 bg-slate-900 p-5 text-left transition hover:border-indigo-400 hover:bg-slate-800"

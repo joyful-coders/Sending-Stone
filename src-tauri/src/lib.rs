@@ -7,6 +7,10 @@ fn greet(name: &str) -> String {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // BLE client for the watch (Android, iOS, Windows, macOS, Linux), see src/lib/watch/.
+        .plugin(tauri_plugin_blec::init())
+        // Saved watch events (audio.wav, motion.csv, meta.json) live in the app data folder.
+        .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_sql::Builder::default().build())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![greet])
