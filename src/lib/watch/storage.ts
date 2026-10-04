@@ -28,6 +28,9 @@ export type SavedEvent = {
   audioSeconds: number;
   motionSamples: number;
   triggerCount: number;
+  transcript: string | null;
+  toxicityScore: number | null;
+  analysisStatus: 'pending' | 'done' | 'failed' | 'empty';
 };
 
 /** Browser-only: the files of events saved this session. */
@@ -47,20 +50,14 @@ function folderName(stamp: Date, eventId: number, trigger: string) {
 
 async function ensureTable() {
   const db = await getDB();
-  await db.execute(`
-    CREATE TABLE IF NOT EXISTS watch_events (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      folder TEXT NOT NULL UNIQUE,
-      device_event_id INTEGER NOT NULL,
-      trigger TEXT NOT NULL,
-      label TEXT NOT NULL,
-      triggered_at TEXT NOT NULL,
-      audio_seconds REAL NOT NULL,
-      motion_samples INTEGER NOT NULL,
-      trigger_count INTEGER NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
+  await db.execute(`CREATE TABLE IF NOT EXISTS watch_events ( ... )`); // unchanged
+
+  const cols = await db.select<{ name: string }[]>('PRAGMA table_info(watch_events)');
+  const have = new Set(cols.map((c) => c.name));
+  if (!have.has('transcript'))     await db.execute('ALTER TABLE watch_events ADD COLUMN transcript TEXT');
+  if (!have.has('toxicity_score')) await db.execute('ALTER TABLE watch_events ADD COLUMN toxicity_score REAL');
+  if (!have.has('analysis_status'))
+    await db.execute("ALTER TABLE watch_events ADD COLUMN analysis_status TEXT NOT NULL DEFAULT 'pending'");
   return db;
 }
 
@@ -80,19 +77,21 @@ export async function saveEvent(blob: Uint8Array, triggeredAt: Date | null): Pro
   const csv = motionCsv(event);
   const json = JSON.stringify(summary, null, 2);
 
-  if (isTauri()) {
     const db = await ensureTable();
     // Never overwrite an earlier save (the watch reuses ids after a reset).
     for (let suffix = 1; (await db.select<unknown[]>('SELECT 1 FROM watch_events WHERE folder = $1', [folder])).length; suffix++) {
       folder = `${folderName(stamp, event.meta.eventId, event.meta.trigger)}~${suffix}`;
     }
-    const dir = `events/${folder}`;
-    const options = { baseDir: BaseDirectory.AppData };
-    await mkdir(dir, { ...options, recursive: true });
-    await writeFile(`${dir}/event.bin`, blob, options);
-    await writeFile(`${dir}/audio.wav`, wav, options);
-    await writeTextFile(`${dir}/motion.csv`, csv, options);
-    await writeTextFile(`${dir}/meta.json`, json, options);
+
+    if(isTauri()){
+      const dir = `events/${folder}`;
+      const options = { baseDir: BaseDirectory.AppData };
+      await mkdir(dir, { ...options, recursive: true });
+      await writeFile(`${dir}/event.bin`, blob, options);
+      await writeFile(`${dir}/audio.wav`, wav, options);
+      await writeTextFile(`${dir}/motion.csv`, csv, options);
+      await writeTextFile(`${dir}/meta.json`, json, options);
+    }
     await db.execute(
       `INSERT INTO watch_events (folder, device_event_id, trigger, label, triggered_at, audio_seconds, motion_samples, trigger_count)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
@@ -107,14 +106,27 @@ export async function saveEvent(blob: Uint8Array, triggeredAt: Date | null): Pro
         event.meta.triggerCount
       ]
     );
-  } else {
-    sessionFiles.set(folder, {
-      audio: new Blob([wav as BlobPart], { type: 'audio/wav' }),
-      motion: new Blob([csv], { type: 'text/csv' }),
-      meta: new Blob([json], { type: 'application/json' }),
-      raw: new Blob([blob as BlobPart], { type: 'application/octet-stream' })
+  
+   if (!isTauri()) {
+  const audioBlobData = new Blob([wav as BlobPart], { type: 'audio/wav' });
+  sessionFiles.set(folder, {
+    audio: audioBlobData,
+    motion: new Blob([csv], { type: 'text/csv' }),
+    meta: new Blob([json], { type: 'application/json' }),
+    raw: new Blob([blob as BlobPart], { type: 'application/octet-stream' })
+  });
+  // Persist the audio on the server so playback survives a refresh.
+  try {
+    const res = await fetch(`/api/audio/${encodeURIComponent(folder)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'audio/wav' },
+      body: audioBlobData
     });
+    if (!res.ok) console.warn('Audio upload failed:', res.status);
+  } catch (e) {
+    console.warn('Audio upload failed:', e);
   }
+}
 
   const saved: SavedEvent = {
     folder,
@@ -124,7 +136,10 @@ export async function saveEvent(blob: Uint8Array, triggeredAt: Date | null): Pro
     triggeredAt: stamp.toISOString(),
     audioSeconds: summary.audioSeconds,
     motionSamples: summary.motionSamples,
-    triggerCount: event.meta.triggerCount
+    triggerCount: event.meta.triggerCount,
+    transcript: null,
+    toxicityScore: null,
+    analysisStatus: 'pending'
   };
   await addActivity(
     'Watch recording saved',
@@ -138,9 +153,9 @@ export async function saveEvent(blob: Uint8Array, triggeredAt: Date | null): Pro
 
 /** Saved events, newest first. */
 export async function listSavedEvents(limit = 50): Promise<SavedEvent[]> {
-  if (!isTauri()) return browserEvents.slice(0, limit);
+  browserEvents.slice(0, limit);
   const db = await ensureTable();
-  const rows = await db.select<
+    const rows = await db.select<
     {
       folder: string;
       device_event_id: number;
@@ -150,9 +165,12 @@ export async function listSavedEvents(limit = 50): Promise<SavedEvent[]> {
       audio_seconds: number;
       motion_samples: number;
       trigger_count: number;
+      transcript: string | null;
+      toxicity_score: number | null;
+      analysis_status: string;
     }[]
   >(
-    `SELECT folder, device_event_id, trigger, label, triggered_at, audio_seconds, motion_samples, trigger_count
+    `SELECT folder, device_event_id, trigger, label, triggered_at, audio_seconds, motion_samples, trigger_count, transcript, toxicity_score, analysis_status
      FROM watch_events ORDER BY triggered_at DESC, id DESC LIMIT $1`,
     [limit]
   );
@@ -164,19 +182,41 @@ export async function listSavedEvents(limit = 50): Promise<SavedEvent[]> {
     triggeredAt: r.triggered_at,
     audioSeconds: r.audio_seconds,
     motionSamples: r.motion_samples,
-    triggerCount: r.trigger_count
+    triggerCount: r.trigger_count,
+    transcript: r.transcript,
+    toxicityScore: r.toxicity_score,
+    analysisStatus: r.analysis_status as SavedEvent['analysisStatus']
   }));
+}
+/** A playable URL for a saved event's audio. Revoke it with URL.revokeObjectURL when done. */
+
+export async function audioBlob(folder: string): Promise<Blob> {
+  if (!isTauri()) {
+    const files = sessionFiles.get(folder);
+    if (files) return files.audio;
+    // Not in memory (page was refreshed): fetch it from the server.
+    const res = await fetch(`/api/audio/${encodeURIComponent(folder)}`);
+    if (!res.ok) throw new Error('This recording is no longer available.');
+    return res.blob();
+  }
+  const bytes = await readFile(`events/${folder}/audio.wav`, { baseDir: BaseDirectory.AppData });
+  return new Blob([bytes as BlobPart], { type: 'audio/wav' });
 }
 
 /** A playable URL for a saved event's audio. Revoke it with URL.revokeObjectURL when done. */
 export async function audioUrl(folder: string): Promise<string> {
-  if (!isTauri()) {
-    const files = sessionFiles.get(folder);
-    if (!files) throw new Error('This recording is no longer in memory.');
-    return URL.createObjectURL(files.audio);
-  }
-  const bytes = await readFile(`events/${folder}/audio.wav`, { baseDir: BaseDirectory.AppData });
-  return URL.createObjectURL(new Blob([bytes as BlobPart], { type: 'audio/wav' }));
+  return URL.createObjectURL(await audioBlob(folder));
+}
+
+export async function saveAnalysis(
+  folder: string,
+  r: { transcript?: string; toxicity?: number | null; status: 'done' | 'failed' | 'empty' }
+) {
+  const db = await ensureTable();
+  await db.execute(
+    `UPDATE watch_events SET transcript = $1, toxicity_score = $2, analysis_status = $3 WHERE folder = $4`,
+    [r.transcript ?? null, r.toxicity ?? null, r.status, folder]
+  );
 }
 
 /** Browser-only: download links for an event's files. */

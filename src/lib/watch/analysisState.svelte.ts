@@ -1,0 +1,1 @@
+export const analysis = $state({ version: 0 });

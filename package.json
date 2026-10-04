@@ -21,6 +21,7 @@
     "@tauri-apps/plugin-opener": "^2",
     "@tauri-apps/plugin-sql": "^2.5.0",
     "@types/web-bluetooth": "^0.0.21",
+    "better-sqlite3": "^13.0.3",
     "dotenv": "^18.0.5",
     "elevenlabs-js": "^1.2.6",
     "twilio": "^6.1.2"
@@ -31,6 +32,7 @@
     "@sveltejs/vite-plugin-svelte": "^7.1.2",
     "@tailwindcss/vite": "^4.3.3",
     "@tauri-apps/cli": "^2",
+    "@types/better-sqlite3": "^9.6.0",
     "svelte": "^5.56.3",
     "svelte-check": "^4.6.0",
     "tailwindcss": "^4.3.3",

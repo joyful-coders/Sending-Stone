@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { analysis } from '$lib/watch/analysisState.svelte';
   import { goto } from '$app/navigation';
   import { onDestroy } from 'svelte';
   import { watch } from '$lib/watch/watchClient.svelte';
@@ -36,10 +37,18 @@
   // Reload the list whenever an event is saved (watch.savedCount changes).
   $effect(() => {
     void watch.savedCount;
+    void analysis.version;
     listSavedEvents()
       .then((list) => (events = list))
       .catch((e) => (message = `Could not load recordings: ${e instanceof Error ? e.message : String(e)}`));
   });
+
+  //Paramters for labeling
+  function toxicityLabel(score: number) {
+  if (score >= 0.7) return { text: 'High', cls: 'bg-rose-500/20 text-rose-300' };
+  if (score >= 0.4) return { text: 'Medium', cls: 'bg-amber-400/20 text-amber-200' };
+  return { text: 'Low', cls: 'bg-emerald-400/20 text-emerald-300' };
+}
 
   async function play(event: SavedEvent) {
     stopPlaying();
@@ -241,6 +250,24 @@
                 </button>
               {/if}
 
+              <div class="mt-3 border-t border-slate-800 pt-3 text-sm">
+  {#if event.analysisStatus === 'pending'}
+    <p class="text-slate-500">Analyzing…</p>
+  {:else if event.analysisStatus === 'failed'}
+    <p class="text-rose-300">Analysis failed.</p>
+  {:else if event.analysisStatus === 'empty'}
+    <p class="text-slate-500">No speech detected.</p>
+  {:else if event.toxicityScore !== null}
+    {@const t = toxicityLabel(event.toxicityScore)}
+    <div class="flex items-center gap-2">
+      <span class="rounded-md px-2 py-0.5 text-xs font-semibold {t.cls}">
+        Toxicity: {t.text} ({event.toxicityScore.toFixed(2)})
+      </span>
+    </div>
+    <p class="mt-2 text-slate-300">{event.transcript}</p>
+  {/if}
+</div>
+
               {#if watch.transport.kind === 'web'}
                 <div class="mt-2 flex flex-wrap gap-3 text-xs">
                   {#each sessionDownloads(event.folder) as file (file.name)}
@@ -265,7 +292,7 @@
     </details>
 
     <p class="mt-7 text-center text-xs leading-5 text-slate-500">
-      Works with any watch running the {DEFAULT_DEVICE_NAME} firmware. Recordings stay on this device.
+      Works with any watch running the {DEFAULT_DEVICE_NAME} firmware. Recordings stay on this device and are sent to elevenlabs for transcription.
     </p>
   </section>
 </main>
