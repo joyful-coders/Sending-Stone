@@ -213,6 +213,22 @@ constexpr float kJoltGyroDps = 700.0f;
 /** @brief Minimum time, in milliseconds, between two jolt triggers, so one impact doesn't trigger repeatedly. */
 constexpr unsigned long kJoltCooldownMs = 1UL * 2UL * 1000UL; // 2 seconds
 
+/**
+ * @brief When true, pressing the button starts (or extends) an event.
+ *
+ * @details
+ * Wire a momentary push button between the header's GPIO0 pin and GND. The
+ * pin uses the chip's internal pull-up, so nothing else is needed. The header
+ * pins sit behind level shifters powered by the PMIC's LDO, so setup()
+ * turns that on (at 1.8 V) while the button is enabled.
+ *
+ */
+constexpr bool kEnableButton = true;
+/** @brief Arduino pin of the button: 5 is the header's GPIO0 (nRF P0.24), which nothing else uses. */
+constexpr uint8_t kButtonPin = 5;
+/** @brief Minimum time, in milliseconds, between two button triggers (covers switch bounce and double presses). */
+constexpr unsigned long kButtonCooldownMs = 1UL * 1UL * 1000UL; // 1 second
+
 } // namespace trigger_config
 
 namespace ble_config {

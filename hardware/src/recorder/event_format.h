@@ -31,8 +31,10 @@ enum class TriggerType : uint8_t {
     Keyword = 1,
     /** @brief A sudden jolt of movement. Detail is 1 (acceleration) or 2 (rotation). */
     Jolt = 2,
-    /** @brief A manual trigger: the client's TRIGGER command (and, later, a button). */
+    /** @brief A manual trigger: the client's TRIGGER command. */
     Manual = 3,
+    /** @brief The wearer pressed the button (trigger_config::kButtonPin). */
+    Button = 4,
 };
 
 /** @brief Header at the start of every event (the transfer's first 64 bytes, file @c m.bin). */
