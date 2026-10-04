@@ -62,6 +62,8 @@ The firmware records 16 kHz audio and 50 Hz motion data to external flash. A tri
 - For native desktop/mobile builds: Rust and the platform prerequisites for Tauri 2
 - For Android builds: Android SDK/NDK and Rust Android targets; see the [Tauri Android prerequisites](https://v2.tauri.app/start/prerequisites/#android)
 
+The root chat screen calls Gemini through the SvelteKit `/api/chat` server route. Create a Gemini API key in [Google AI Studio](https://aistudio.google.com/app/apikey), copy `.env.example` to `.env`, and set `GEMINI_API_KEY`. Keep the key on the server and out of client-side code. The API route requires a server runtime; it works with the SvelteKit dev server, but a static Tauri build does not include server routes. For a deployed or native app, point the chat request at a separately hosted API service before shipping.
+
 ```bash
 npm install
 npm run dev
@@ -116,5 +118,4 @@ Use `python ble_client.py --trigger` to send a manual test trigger, or `python b
 ## Privacy and Responsible Testing Notice
 
 **Please note:** this prototype is always recording audio (when powered on) and storing event files on the wearable and client. Any downloaded recordings are to be privated and or deleted. Any stored recordings after hackathon judging will be deleted. Audio recording can cause major security risks; do not use Sending Stone to record people without appropriate consent. 
-
 
