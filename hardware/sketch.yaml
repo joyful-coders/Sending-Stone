@@ -1,0 +1,14 @@
+# Arduino CLI project file: pins the board, core, and library versions.
+# Build:  arduino-cli compile --profile nicla_voice
+# Upload: arduino-cli upload  --profile nicla_voice -p <PORT>
+default_fqbn: arduino:mbed_nicla:nicla_voice
+default_profile: nicla_voice
+
+profiles:
+  nicla_voice:
+    fqbn: arduino:mbed_nicla:nicla_voice
+    platforms:
+      - platform: arduino:mbed_nicla (4.6.0)
+    libraries:
+      - ArduinoBLE (2.0.1)
+      - ArduinoThread (2.1.1)
