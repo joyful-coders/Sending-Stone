@@ -46,3 +46,7 @@ package-lock.json
 uv.lock
 
 .venv
+/.data
+/.venv
+uv.lock
+distilbert*
