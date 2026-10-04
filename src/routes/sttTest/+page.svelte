@@ -1,6 +1,8 @@
 <script lang="ts">
+    import { json } from "@sveltejs/kit";
     import { onMount } from "svelte";
 
+    let sending = $state(false);
   let loading = $state(false);
   let transcript = $state('');
   let chunks: Blob[] = [];
@@ -23,7 +25,24 @@
     transcript = data.text;
     loading = false;
   }
+
+  async function sendSMS(message: string) {
+    sending = true;
+    status = '';
+      const res = await fetch('/api/notify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message })
+      });
+
+      if (!res.ok) throw new Error(`Request failed: ${res.status}`);
+
+      const data = await res.json();
+      status = `Sent (${data.status})`;
+  }
+
 </script>
 
 {#if loading}<p>Transcribing…</p>{/if}
 <p>{transcript}</p>
+<button onclick={() => sendSMS("TEST MSG")}>TEST SMS</button>
