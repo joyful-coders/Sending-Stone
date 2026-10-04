@@ -34,3 +34,7 @@ src-tauri/gen/android/local.properties
 src-tauri/gen/android/keystore.properties
 src-tauri/gen/android/.externalNativeBuild/
 src-tauri/gen/android/captures/
+
+/models./distilbert-violent/*
+
+.data
