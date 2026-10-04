@@ -43,7 +43,7 @@ export const Message = {
   Error: 0x87
 } as const;
 
-export const TRIGGER_NAMES: Record<number, string> = { 0: 'none', 1: 'keyword', 2: 'jolt', 3: 'manual' };
+export const TRIGGER_NAMES: Record<number, string> = { 0: 'none', 1: 'keyword', 2: 'jolt', 3: 'manual', 4: 'button' };
 export const ERROR_NAMES: Record<number, string> = { 1: 'bad command', 2: 'no such event', 3: 'storage error' };
 
 export function triggerName(type: number): string {

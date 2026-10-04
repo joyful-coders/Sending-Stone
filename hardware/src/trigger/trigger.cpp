@@ -1,7 +1,7 @@
 /**
  * @file trigger.cpp
  *
- * @brief Implementation of the event triggers: keyword, jolt, and manual.
+ * @brief Implementation of the event triggers: keyword, jolt, button, and manual.
  *
  * @details
  * - Keyword: a cooperative @c Thread polls the NDP for keyword matches every
@@ -11,6 +11,10 @@
  *   magnitudes so there's no square root per sample. One impact can exceed
  *   the threshold for several samples, so jolts are rate-limited by @c
  *   trigger_config::kJoltCooldownMs.
+ * - Button: a press on @c trigger_config::kButtonPin (to GND, internal
+ *   pull-up). An interrupt latches each press, so a short tap isn't missed
+ *   while the loop is busy (a flash write can take ~100 ms); the main loop
+ *   then triggers, rate-limited by @c trigger_config::kButtonCooldownMs.
  * - Manual: @c triggerManually(), from the client's TRIGGER command.
  *
  * Filtering out everyday motion (running, sports) is not done yet; it needs
@@ -44,6 +48,36 @@ float gyroThresholdSq = 0.0f;
 uint32_t lastJoltMs = 0;
 /** @brief Whether a jolt has triggered yet (so the cooldown doesn't block the first one). */
 bool joltSeen = false;
+
+/** @brief Set by the button interrupt on each press; cleared by @c checkButton(). */
+volatile bool buttonPressed = false;
+/** @brief millis() of the last button trigger. */
+uint32_t lastButtonMs = 0;
+/** @brief Whether the button has triggered yet (so the cooldown doesn't block the first press). */
+bool buttonSeen = false;
+
+/** @brief Button interrupt (falling edge: pressed). Only latches; the main loop does the rest. */
+void onButtonEdge() {
+    buttonPressed = true;
+}
+
+/**
+ * @brief Trigger an event if the button was pressed since the last check.
+ *
+ * @par Returns
+ * Nothing.
+ *
+ */
+void checkButton() {
+    if (!buttonPressed) return;
+    buttonPressed = false;
+    uint32_t now = millis();
+    if (buttonSeen && now - lastButtonMs < trigger_config::kButtonCooldownMs) return; // bounce or double press
+    buttonSeen = true;
+    lastButtonMs = now;
+    debug_logs::triggerLogging("Button pressed.");
+    triggerEvent(TriggerType::Button, 0, 0.0f, "button");
+}
 
 /** @brief Jolt detail value: acceleration crossed its threshold. */
 constexpr uint8_t kJoltByAccel = 1;
@@ -126,14 +160,19 @@ void startTriggerModule() {
         addImuSampleHandler(checkJolt);
     }
     keywordThread.enabled = trigger_config::kEnableKeyword && startKeywordDetection();
+    if (trigger_config::kEnableButton) {
+        pinMode(trigger_config::kButtonPin, INPUT_PULLUP);
+        attachInterrupt(digitalPinToInterrupt(trigger_config::kButtonPin), onButtonEdge, FALLING);
+    }
 
-    debug_logs::triggerLogging("Started triggers: keyword %s, jolt %s (%.1f g / %.0f dps).",
+    debug_logs::triggerLogging("Started triggers: keyword %s, jolt %s (%.1f g / %.0f dps), button %s.",
         trigger_config::kEnableKeyword ? "on" : "off", trigger_config::kEnableJolt ? "on" : "off",
-        trigger_config::kJoltAccelG, trigger_config::kJoltGyroDps);
+        trigger_config::kJoltAccelG, trigger_config::kJoltGyroDps, trigger_config::kEnableButton ? "on" : "off");
 }
 
 void updateTriggerModule() {
     runIfDue(keywordThread);
+    if (trigger_config::kEnableButton) checkButton();
 }
 
 uint16_t triggerManually() {

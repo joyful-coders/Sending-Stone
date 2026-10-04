@@ -17,7 +17,8 @@ and reconnects. The protocol and byte formats are documented in
 
 Usage:
     python ble_client.py              # listen until Ctrl+C, saving to ./output/
-    python ble_client.py --output D:ecordings   # save somewhere else
+    python ble_client.py --output D:
+ecordings   # save somewhere else
     python ble_client.py --trigger    # also trigger an event manually once connected (for testing)
     python ble_client.py --selftest   # check the decoder on a synthetic event, no BLE needed
 """
@@ -60,7 +61,7 @@ OUTPUT_DIR = Path(__file__).resolve().parent / "output"
 
 # --- Event byte format (src/recorder/event_format.h) -------------------------
 
-TRIGGER_NAMES = {0: "none", 1: "keyword", 2: "jolt", 3: "manual"}
+TRIGGER_NAMES = {0: "none", 1: "keyword", 2: "jolt", 3: "manual", 4: "button"}
 META = struct.Struct("<4sBBBBHHIIIIfHHHHH18s4s")
 RECORD = struct.Struct("<BBHI")          # type, info, payload bytes, timestamp ms
 AUDIO_HEADER = struct.Struct("<hBBH")    # predictor, step index, reserved, sample count
