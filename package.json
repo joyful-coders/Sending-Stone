@@ -17,6 +17,7 @@
     "@elevenlabs/elevenlabs-js": "^2.70.0",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-opener": "^2",
+    "@tauri-apps/plugin-sql": "^2.5.0",
     "dotenv": "^18.0.5",
     "elevenlabs-js": "^1.2.6",
     "twilio": "^6.1.2"
