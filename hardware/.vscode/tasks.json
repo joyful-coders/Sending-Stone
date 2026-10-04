@@ -34,6 +34,22 @@
             "problemMatcher": ["$gcc"]
         },
         {
+            // Debug build: adds the status LED and serial logging (NICLA_DEBUG=1, see src/configs.h).
+            // Separate build folder so its cache never mixes with the normal build.
+            "label": "Nicla: Build (debug)",
+            "type": "shell",
+            "command": "& $env:ARDUINO_CLI compile --profile nicla_voice --build-path build/debug --build-property 'compiler.cpp.extra_flags=-DNICLA_DEBUG=1' .",
+            "options": { "shell": { "executable": "powershell.exe", "args": ["-NoProfile", "-Command"] } },
+            "problemMatcher": ["$gcc"]
+        },
+        {
+            "label": "Nicla: Upload (debug)",
+            "type": "shell",
+            "command": "& $env:ARDUINO_CLI compile --profile nicla_voice --build-path build/debug --build-property 'compiler.cpp.extra_flags=-DNICLA_DEBUG=1' --upload -p ${input:port} .",
+            "options": { "shell": { "executable": "powershell.exe", "args": ["-NoProfile", "-Command"] } },
+            "problemMatcher": ["$gcc"]
+        },
+        {
             // Same OpenOCD steps as the core's uploader, but at 1 MHz SWD instead of 10 MHz,
             // plus a verify. Use when "Nicla: Upload" fails with flash write errors.
             "label": "Nicla: Upload (slow)",

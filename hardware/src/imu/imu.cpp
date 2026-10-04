@@ -8,8 +8,8 @@
  * through @c NDP.sensorBMI270Read() / @c NDP.sensorBMI270Write(). The startup
  * sequence follows the core's NDP SensorTest example. A cooperative @c Thread
  * then samples it every @c imu_config::kThreadRefreshIntervalMs with a single
- * burst read covering acceleration, angular rate, and temperature, and keeps
- * the newest sample for other modules to read via @c getLatestImuReading().
+ * burst read covering acceleration and angular rate, and hands each raw sample
+ * to the registered handlers (the recorder and the jolt trigger).
  *
  */
 
@@ -36,9 +36,8 @@ namespace {
  * @{
  */
 constexpr uint8_t kRegChipId = 0x00;
-constexpr uint8_t kRegData = 0x0C;           // first of ACC X/Y/Z, GYR X/Y/Z ... TEMPERATURE
+constexpr uint8_t kRegData = 0x0C;           // ACC X/Y/Z then GYR X/Y/Z, 12 bytes
 constexpr uint8_t kRegInternalStatus = 0x21;
-constexpr uint8_t kRegTemperature = 0x22;
 constexpr uint8_t kRegAccConf = 0x40;
 constexpr uint8_t kRegAccRange = 0x41;
 constexpr uint8_t kRegGyrConf = 0x42;
@@ -54,19 +53,14 @@ constexpr uint8_t kCmdSoftReset = 0xB6;
 constexpr uint8_t kInitOk = 0x01;
 constexpr uint8_t kAccConf = 0xA8;           // 100 Hz ODR, normal averaging, performance mode
 constexpr uint8_t kGyrConf = 0xA9;           // 200 Hz ODR, normal filter, performance mode
-constexpr uint8_t kPwrCtrlAccGyrTemp = 0x0E; // accelerometer, gyroscope, and temperature on
+constexpr uint8_t kPwrCtrlAccGyr = 0x06;     // accelerometer and gyroscope on (temperature sensor off)
 constexpr uint8_t kPwrConfFastPowerUp = 0x02;
 
-/** @brief Bytes in one burst from @c kRegData through the end of the temperature register. */
-constexpr uint8_t kBurstLength = kRegTemperature + 2 - kRegData;
+/** @brief Bytes in one burst: accelerometer then gyroscope X/Y/Z. */
+constexpr uint8_t kBurstLength = 12;
 /** @brief Offset of the gyroscope data within the burst. */
 constexpr uint8_t kGyroOffset = 6;
-/** @brief Offset of the temperature within the burst. */
-constexpr uint8_t kTempOffset = kRegTemperature - kRegData;
 /** @} */ // end of BMI270Registers
-
-/** @brief Standard gravity, in m/s^2, for converting g to m/s^2. */
-constexpr float kGravity = 9.80665f;
 
 /**
  * @brief ACC_RANGE register value for a range in g.
@@ -96,13 +90,20 @@ constexpr uint8_t gyroRangeBits(uint16_t rangeDps) {
 static_assert(accelRangeBits(imu_config::kAccelRangeG) != 0xFF, "imu_config::kAccelRangeG must be 2, 4, 8, or 16.");
 static_assert(gyroRangeBits(imu_config::kGyroRangeDps) != 0xFF, "imu_config::kGyroRangeDps must be 125, 250, 500, 1000, or 2000.");
 
-/** @brief m/s^2 per accelerometer LSB at the configured range. */
-constexpr float kAccelScale = imu_config::kAccelRangeG * kGravity / 32768.0f;
-/** @brief rad/s per gyroscope LSB at the configured range. */
-constexpr float kGyroScale = imu_config::kGyroRangeDps / 32768.0f * (PI / 180.0f);
+/** @brief g per accelerometer count at the configured range. */
+constexpr float kAccelGPerCount = imu_config::kAccelRangeG / 32768.0f;
+/** @brief Degrees per second per gyroscope count at the configured range. */
+constexpr float kGyroDpsPerCount = imu_config::kGyroRangeDps / 32768.0f;
 
-/** @brief The newest sample taken by @c imuTick(). */
-LatestReading<ImuReading> latest;
+/** @brief Maximum number of sample handlers. */
+constexpr uint8_t kMaxHandlers = 4;
+/** @brief Registered sample handlers, see @c addImuSampleHandler(). */
+ImuSampleHandler handlers[kMaxHandlers] = {};
+/** @brief Number of entries used in @c handlers. */
+uint8_t handlerCount = 0;
+
+/** @brief The newest sample, kept only for the debug log. */
+LatestReading<ImuSample> latest;
 
 /**
  * @brief Decode a little-endian signed 16-bit value.
@@ -195,18 +196,15 @@ void imuTick() {
         return;
     }
 
-    ImuReading reading = latest.value(); // keeps the last temperature if this one is invalid
+    ImuSample sample;
     for (uint8_t i = 0; i < 3; ++i) {
-        reading.accel[i] = readInt16(&data[2 * i]) * kAccelScale;
-        reading.gyro[i] = readInt16(&data[kGyroOffset + 2 * i]) * kGyroScale;
+        sample.accel[i] = readInt16(&data[2 * i]);
+        sample.gyro[i] = readInt16(&data[kGyroOffset + 2 * i]);
     }
+    sample.timestampMs = millis();
 
-    // Temperature is 1/512 K per LSB around 23 C, with 0x8000 meaning "no valid reading yet".
-    int16_t rawTemp = readInt16(&data[kTempOffset]);
-    if (rawTemp != INT16_MIN) reading.temperatureC = 23.0f + rawTemp / 512.0f;
-
-    reading.timestampMs = millis();
-    latest.store(reading);
+    if (debug_config::kEnableIMULogging) latest.store(sample);
+    for (uint8_t i = 0; i < handlerCount; ++i) handlers[i](sample);
 }
 
 /**
@@ -221,9 +219,10 @@ void imuTick() {
  */
 void imuLogTick() {
     if (!latest.valid()) return;
-    const ImuReading& r = latest.value();
-    debug_logs::imuLogging("Accel [%.2f, %.2f, %.2f] m/s^2 Gyro [%.2f, %.2f, %.2f] rad/s Temp %.1f C",
-        r.accel[0], r.accel[1], r.accel[2], r.gyro[0], r.gyro[1], r.gyro[2], r.temperatureC);
+    const ImuSample& r = latest.value();
+    debug_logs::imuLogging("Accel [%.2f, %.2f, %.2f] g Gyro [%.0f, %.0f, %.0f] dps",
+        r.accel[0] * kAccelGPerCount, r.accel[1] * kAccelGPerCount, r.accel[2] * kAccelGPerCount,
+        r.gyro[0] * kGyroDpsPerCount, r.gyro[1] * kGyroDpsPerCount, r.gyro[2] * kGyroDpsPerCount);
 }
 
 /** @brief Thread for sampling the BMI270. */
@@ -258,7 +257,7 @@ bool startIMUModule() {
     }
 
     bool configured =
-        NDP.sensorBMI270Write(kRegPwrCtrl, kPwrCtrlAccGyrTemp) == 0 &&
+        NDP.sensorBMI270Write(kRegPwrCtrl, kPwrCtrlAccGyr) == 0 &&
         NDP.sensorBMI270Write(kRegAccConf, kAccConf) == 0 &&
         NDP.sensorBMI270Write(kRegAccRange, accelRangeBits(imu_config::kAccelRangeG)) == 0 &&
         NDP.sensorBMI270Write(kRegGyrConf, kGyrConf) == 0 &&
@@ -282,7 +281,17 @@ void updateIMUModule() {
     runIfDue(imuLogThread);
 }
 
-bool getLatestImuReading(ImuReading& reading) {
-    return latest.copyTo(reading);
+bool addImuSampleHandler(ImuSampleHandler handler) {
+    if (handler == nullptr || handlerCount >= kMaxHandlers) return false;
+    handlers[handlerCount++] = handler;
+    return true;
+}
+
+float imuAccelGPerCount() {
+    return kAccelGPerCount;
+}
+
+float imuGyroDpsPerCount() {
+    return kGyroDpsPerCount;
 }
 /** @} */ // end of Public

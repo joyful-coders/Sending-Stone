@@ -8,34 +8,35 @@
 #include <cstdint>
 
 /**
- * @brief Every status LED state, as X(name, color, failed, log message).
+ * @brief Every device state, as X(name, color, failed, log message).
  *
  * @details
- * The single source of truth for the status LED: expanded here into @c
- * BlinkState, and in led_handler.cpp into the pattern table. Each state's
- * blink timing is the @c k<name>Pattern array in led_handler.cpp. @c failed
- * states make @c inFailedState() true. To add a state, add a line here and its
- * pattern there.
+ * The single source of truth for device state: expanded here into @c
+ * BlinkState, and in led_handler.cpp into the state table. @c failed states
+ * make @c inFailedState() true in every build. The LED itself (color, and the
+ * @c k<name>Pattern blink timing in led_handler.cpp) only exists in debug
+ * builds (@c NICLA_DEBUG = 1). To add a state, add a line here and its pattern
+ * there.
  *
- * | State     | LED                            |
+ * | State     | LED (debug builds)             |
  * |-----------|--------------------------------|
  * | Setup     | blue blink                     |
  * | NDPFail   | slow magenta blink             |
  * | IMUFail   | two red blinks                 |
- * | MagFail   | three red blinks               |
- * | SoundFail | slow yellow blink              |
- * | BLEFail   | long then short blue blink     |
+ * | AudioFail | slow yellow blink              |
+ * | StorageFail | slow cyan blink              |
+ * | BLEFail   | long then short white blink    |
  * | Idle      | short green blip every 2 s     |
  *
  */
-#define BLINK_STATES(X)                                                   \
-    X(Setup,     blue,    false, "Device is starting up...")              \
-    X(NDPFail,   magenta, true,  "NDP120 failed to load its firmware.")   \
-    X(IMUFail,   red,     true,  "BMI270 failed to initialize.")          \
-    X(MagFail,   red,     true,  "BMM150 failed to initialize.")          \
-    X(SoundFail, yellow,  true,  "Microphone failed to start.")           \
-    X(BLEFail,   blue,    true,  "BLE failed to start.")                  \
-    X(Idle,      green,   false, "Device is idle.")
+#define BLINK_STATES(X)                                                       \
+    X(Setup,       blue,    false, "Device is starting up...")                \
+    X(NDPFail,     magenta, true,  "NDP120 failed to load its firmware.")     \
+    X(IMUFail,     red,     true,  "BMI270 failed to initialize.")            \
+    X(AudioFail,   yellow,  true,  "Microphone failed to start.")             \
+    X(StorageFail, cyan,    true,  "External flash storage failed to mount.") \
+    X(BLEFail,     white,   true,  "BLE failed to start.")                    \
+    X(Idle,        green,   false, "Device is idle.")
 
 /** @brief Enumerates the possible states for the status LED, generated from @c BLINK_STATES. */
 enum class BlinkState : uint8_t {
@@ -48,8 +49,8 @@ enum class BlinkState : uint8_t {
  * @brief Start the status LED module.
  *
  * @details
- * Starts the onboard RGB LED driver (over I2C, so call after @c
- * nicla::begin()) and the module's cooperative thread. Call once during @c
+ * In debug builds, starts the onboard RGB LED driver (over I2C, so call after
+ * @c nicla::begin()) and the module's cooperative thread. Call once during @c
  * setup(), before @c setStatusState().
  *
  * @par Parameters
@@ -57,7 +58,7 @@ enum class BlinkState : uint8_t {
  *
  * @return The status of the LED module startup attempt.
  * @retval true The LED was initialized.
- * @retval false @c debug_config::kEnableStatusLight is false.
+ * @retval false This is a normal build, there is no status LED.
  *
  */
 bool startStatusLED();

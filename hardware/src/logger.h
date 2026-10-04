@@ -4,6 +4,10 @@
  *
  * @brief Fixed-size, non-allocating queue of debug log messages.
  *
+ * @details
+ * Only exists in debug builds (@c NICLA_DEBUG = 1). In a normal build every
+ * logger below is an empty stub and the queue isn't allocated at all.
+ *
  */
 
 #pragma once
@@ -13,10 +17,11 @@
 #include <stdio.h>
 
 namespace debug_logs {
-/** @brief Maximum number of log messages that can be queued. Kept small, the nRF52832 has 64 KB of RAM. */
-constexpr uint8_t kMaxMessages = 16;
+#if NICLA_DEBUG
+/** @brief Maximum number of log messages that can be queued. Kept small, the nRF52832 has 64 KB of RAM (setup() flushes between steps). */
+constexpr uint8_t kMaxMessages = 8;
 /** @brief Maximum size, in bytes, of each message body (the prefix is stored separately). */
-constexpr uint8_t kMessageSize = 96;
+constexpr uint8_t kMessageSize = 88;
 
 /** @brief A single queued log message. */
 struct LogMessage {
@@ -109,6 +114,15 @@ inline bool flushLogs(const char *separator = "---------------------------------
     return true;
 }
 
+#else // normal build: no queue, every call compiles to nothing
+
+/** @brief Stub, logging is compiled out of normal builds. */
+inline bool pushLog(const char*, const char*, va_list) { return false; }
+/** @brief Stub, logging is compiled out of normal builds. */
+inline bool flushLogs(const char* = nullptr) { return false; }
+
+#endif // NICLA_DEBUG
+
 /**
  * @brief Define a named logger function gated by an enabled flag.
  *
@@ -137,12 +151,13 @@ inline bool flushLogs(const char *separator = "---------------------------------
         return result;                              \
     }
 
-    DEFINE_LOGGER(ledLogging,     debug_config::kEnableLEDLogging,     debug_config::kLEDPrefix)
-    DEFINE_LOGGER(ndpLogging,     debug_config::kEnableNDPLogging,     debug_config::kNDPPrefix)
-    DEFINE_LOGGER(imuLogging,     debug_config::kEnableIMULogging,     debug_config::kIMUPrefix)
-    DEFINE_LOGGER(magLogging,     debug_config::kEnableMagLogging,     debug_config::kMagPrefix)
-    DEFINE_LOGGER(soundLogging,   debug_config::kEnableSoundLogging,   debug_config::kSoundPrefix)
-    DEFINE_LOGGER(batteryLogging, debug_config::kEnableBatteryLogging, debug_config::kBatteryPrefix)
-    DEFINE_LOGGER(bleLogging,     debug_config::kEnableBLELogging,     debug_config::kBLEPrefix)
+    DEFINE_LOGGER(mainLogging,     debug_config::kEnableMainLogging,     debug_config::kMainPrefix)
+    DEFINE_LOGGER(ledLogging,      debug_config::kEnableLEDLogging,      debug_config::kLEDPrefix)
+    DEFINE_LOGGER(ndpLogging,      debug_config::kEnableNDPLogging,      debug_config::kNDPPrefix)
+    DEFINE_LOGGER(imuLogging,      debug_config::kEnableIMULogging,      debug_config::kIMUPrefix)
+    DEFINE_LOGGER(audioLogging,    debug_config::kEnableAudioLogging,    debug_config::kAudioPrefix)
+    DEFINE_LOGGER(recorderLogging, debug_config::kEnableRecorderLogging, debug_config::kRecorderPrefix)
+    DEFINE_LOGGER(triggerLogging,  debug_config::kEnableTriggerLogging,  debug_config::kTriggerPrefix)
+    DEFINE_LOGGER(bleLogging,      debug_config::kEnableBLELogging,      debug_config::kBLEPrefix)
 #undef DEFINE_LOGGER
 } // namespace debug_logs

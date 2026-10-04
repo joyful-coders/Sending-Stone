@@ -10,11 +10,12 @@
  *
  * @details
  * Loads @c ndp_config::kMcuFirmware, @c kDspFirmware, and @c kModel from the
- * board's external flash into the NDP120, in that order. Every other sensor
- * module depends on this: the BMI270 and BMM150 sit on the NDP120's SPI bus,
- * and the microphone feeds its audio pipeline. Must run after @c
- * nicla::begin() and before @c startIMUModule(), @c startMagModule(), and @c
- * startSoundModule().
+ * board's external flash into the NDP120, in that order, reads the model's
+ * keyword labels, and enables match reporting. Every sensor module depends on
+ * this: the BMI270 sits on the NDP120's SPI bus, and the microphone feeds its
+ * audio pipeline. Must run after @c nicla::begin() and before @c
+ * startIMUModule() and @c startAudioModule(), and before the recorder mounts
+ * the flash (the library unmounts it after loading).
  *
  * @note
  * Takes a few seconds, the packages are streamed over SPI.
@@ -39,3 +40,18 @@ bool startNDPModule();
  *
  */
 bool isNDPReady();
+
+/**
+ * @brief Take the oldest keyword match the NDP has reported, if any, without blocking.
+ *
+ * @details
+ * Must be called from the main loop (the same thread as every other NDP and
+ * flash access). Matches are queued inside the NDP driver, so none are lost
+ * between calls, even while audio is being extracted.
+ *
+ * @param label If not null, receives the matched class's label from the model (e.g. "NN0:alexa").
+ *
+ * @return The matched class index, or -1 if there is no new match.
+ *
+ */
+int pollKeywordMatch(const char** label);

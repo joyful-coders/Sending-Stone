@@ -5,17 +5,20 @@
 
 #pragma once
 
-/** @brief One sample from the BMI270. */
-struct ImuReading {
-    /** @brief Acceleration along X, Y, Z, in m/s^2. */
-    float accel[3];
-    /** @brief Angular rate around X, Y, Z, in rad/s. */
-    float gyro[3];
-    /** @brief BMI270 die temperature, in degrees Celsius. */
-    float temperatureC;
+#include <cstdint>
+
+/** @brief One raw sample from the BMI270, in sensor counts. */
+struct ImuSample {
+    /** @brief Acceleration along X, Y, Z, in counts. See @c imuAccelGPerCount(). */
+    int16_t accel[3];
+    /** @brief Angular rate around X, Y, Z, in counts. See @c imuGyroDpsPerCount(). */
+    int16_t gyro[3];
     /** @brief millis() timestamp the sample was taken at. */
-    unsigned long timestampMs;
+    uint32_t timestampMs;
 };
+
+/** @brief Function called with every new IMU sample, see @c setImuSampleHandler(). */
+typedef void (*ImuSampleHandler)(const ImuSample& sample);
 
 /**
  * @brief Start the IMU module and configure the onboard BMI270.
@@ -24,9 +27,9 @@ struct ImuReading {
  * The BMI270 sits on the NDP120's SPI bus, so this requires @c
  * startNDPModule() to have succeeded. Soft-resets the BMI270, uploads its
  * configuration blob (see bmi270_config.h), retrying up to @c
- * imu_config::kInitAttempts times, then enables the accelerometer, gyroscope,
- * and temperature sensor with the ranges from @c imu_config and starts the
- * module's sampling thread.
+ * imu_config::kInitAttempts times, then enables the accelerometer and
+ * gyroscope with the ranges from @c imu_config and starts the module's
+ * sampling thread.
  *
  * @par Parameters
  * None.
@@ -43,9 +46,8 @@ bool startIMUModule();
  *
  * @details
  * Call regularly from the main loop. Once every @c
- * imu_config::kThreadRefreshIntervalMs, reads a new sample into the module's
- * latest reading, see @c getLatestImuReading(). Periodically logs that reading
- * every @c debug_config::kIMULoopDelay.
+ * imu_config::kThreadRefreshIntervalMs, reads a new sample and passes it to
+ * every registered handler.
  *
  * @par Parameters
  * None.
@@ -57,13 +59,17 @@ bool startIMUModule();
 void updateIMUModule();
 
 /**
- * @brief Copy out the most recent BMI270 sample.
+ * @brief Register a function to receive every new sample.
  *
- * @param reading Destination that receives the latest sample.
+ * @param handler Function to call, from the main loop, with each sample.
  *
- * @return Whether a sample was available.
- * @retval true @p reading was filled with the latest sample.
- * @retval false The module has not started, or no sample has been taken yet.
+ * @return Whether the handler was registered (up to 4 are allowed).
  *
  */
-bool getLatestImuReading(ImuReading& reading);
+bool addImuSampleHandler(ImuSampleHandler handler);
+
+/** @brief g per accelerometer count at the configured range. */
+float imuAccelGPerCount();
+
+/** @brief Degrees per second per gyroscope count at the configured range. */
+float imuGyroDpsPerCount();

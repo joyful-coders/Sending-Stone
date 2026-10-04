@@ -2,99 +2,86 @@
  * @file ble_protocol.h
  * @headerfile ble_protocol.h "src/ble/ble_protocol.h"
  *
- * @brief Wire format of the sensor packet streamed over BLE.
+ * @brief Commands and messages of the BLE event transfer protocol.
  *
  * @details
- * This is the contract shared by @c ble.cpp and any receiving client. Every
- * notification on the readings characteristic carries exactly one @c
- * SensorPacket: 30 bytes, packed, little-endian, with every value sent as a
- * whole number. Divide each scaled field by its @c k*Scale constant below to
- * recover the real-world value. See BLE_PROTOCOL.md for the client-side
- * decoding guide.
+ * This is the contract shared by @c ble.cpp and any client. The device
+ * records continuously and only sends data after a trigger, as stored events
+ * (see event_format.h for an event's bytes):
  *
- * Fields are append-only: everything after byte 20 was added later, so a
- * client that never negotiates a larger ATT MTU (and so only receives the
- * first 20 bytes) still decodes the original fields correctly.
+ * - The client writes commands (first byte @c Command) to the control
+ *   characteristic.
+ * - The device notifies messages (first byte @c Message) on the events
+ *   characteristic: an event starting or finishing, and replies to commands.
+ * - During a transfer, the device notifies event bytes on the data
+ *   characteristic, each notification a @c DataChunkHeader plus payload.
+ *
+ * Everything is packed and little-endian. See BLE_PROTOCOL.md for the full
+ * client guide.
  *
  * @note
- * Any change to existing offsets must bump @c BLE_PACKET_VERSION and update
- * BLE_PROTOCOL.md, since clients decode the bytes positionally.
+ * Any change here must bump @c BLE_PROTOCOL_VERSION and update BLE_PROTOCOL.md
+ * and the Python client.
  *
  */
 
 #pragma once
 
-#include <Arduino.h>
+#include <cstdint>
 
-/** @brief Current sensor packet format version, readable from the version characteristic. */
-constexpr uint8_t BLE_PACKET_VERSION = 1;
+/** @brief Protocol version, readable from the version characteristic. 1 was the old live sensor stream. */
+constexpr uint8_t BLE_PROTOCOL_VERSION = 2;
 
 namespace ble_protocol {
-/** @brief Acceleration fields are m/s^2 multiplied by this (0.01 m/s^2 resolution, +-327.67 m/s^2 span). */
-constexpr float kAccelScale = 100.0f;
-/** @brief Gyro fields are rad/s multiplied by this (0.001 rad/s resolution, +-32.767 rad/s span). */
-constexpr float kGyroScale = 1000.0f;
-/** @brief Temperature field is degrees Celsius multiplied by this (0.01 C resolution). */
-constexpr float kTempScale = 100.0f;
-/** @brief Magnetometer fields are microtesla multiplied by this (0.1 uT resolution, +-3276.7 uT span). */
-constexpr float kMagScale = 10.0f;
-
-/** @brief @c SensorPacket::flags bit set while the board runs from its battery. */
-constexpr uint8_t kFlagOnBattery = 1 << 0;
-/** @brief @c SensorPacket::flags bit set while the battery is charging. */
-constexpr uint8_t kFlagCharging = 1 << 1;
-
-/**
- * @brief Scale a real-world value into a saturating @c int16_t field.
- *
- * @details
- * Rounds to the nearest whole number, then clamps to the @c int16_t range so
- * an out-of-range reading saturates at the limit instead of wrapping around
- * to the opposite sign.
- *
- * @param value Real-world value to encode.
- * @param scale Multiplier applied before rounding, one of the @c k*Scale constants.
- *
- * @return The scaled, rounded, clamped value.
- *
- */
-inline int16_t encodeScaled(float value, float scale) {
-    float scaled = roundf(value * scale);
-    if (scaled > INT16_MAX) return INT16_MAX;
-    if (scaled < INT16_MIN) return INT16_MIN;
-    return static_cast<int16_t>(scaled);
-}
-
-} // namespace ble_protocol
-
-/**
- * @brief One combined sample of every onboard sensor, sent once per notification.
- *
- * @details
- * Packed with no padding and stored little-endian (the nRF52832's native byte
- * order). Byte offsets are fixed, see the table in BLE_PROTOCOL.md.
- *
- */
-struct __attribute__((packed)) SensorPacket
-{
-    /** @brief [0] Device uptime, in milliseconds, when the packet was built. Wraps after ~49.7 days. */
-    uint32_t timestampMs;
-    /** @brief [4] BMI270 acceleration along X, Y, Z, scaled by @c ble_protocol::kAccelScale. */
-    int16_t accel[3];
-    /** @brief [10] BMI270 angular rate around X, Y, Z, scaled by @c ble_protocol::kGyroScale. */
-    int16_t gyro[3];
-    /** @brief [16] BMI270 die temperature, scaled by @c ble_protocol::kTempScale. */
-    int16_t temperature;
-    /** @brief [18] Microphone RMS amplitude of 16-bit PCM, unscaled (0-32767). */
-    uint16_t soundLevel;
-    /** @brief [20] BMM150 magnetic field along X, Y, Z, scaled by @c ble_protocol::kMagScale. */
-    int16_t mag[3];
-    /** @brief [26] Battery voltage, in millivolts, unscaled. 0 when unknown. */
-    uint16_t batteryMilliVolts;
-    /** @brief [28] Battery voltage as a percentage of the regulated (full) voltage. -1 when unknown. */
-    int8_t batteryPercent;
-    /** @brief [29] Status bits, see @c ble_protocol::kFlagOnBattery and @c kFlagCharging. */
-    uint8_t flags;
+/** @brief Commands the client writes to the control characteristic. */
+enum class Command : uint8_t {
+    /** @brief List stored events. Reply: an EVENT_INFO per event, then LIST_END. */
+    List = 0x01,
+    /** @brief Send an event: u16 id, u32 offset, u16 max payload per chunk. Reply: data chunks, then TRANSFER_DONE. */
+    Get = 0x02,
+    /** @brief Delete an event (after saving it): u16 id. Reply: DELETED or ERROR. */
+    Delete = 0x03,
+    /** @brief Stop the current transfer. No reply. */
+    Cancel = 0x04,
+    /** @brief Trigger an event manually. Reply: EVENT_STARTED (or nothing if one is already recording, it's extended). */
+    Trigger = 0x05,
 };
 
-static_assert(sizeof(SensorPacket) == 30, "SensorPacket layout changed, update BLE_PROTOCOL.md and the test client.");
+/** @brief Messages the device notifies on the events characteristic. */
+enum class Message : uint8_t {
+    /** @brief A trigger started an event: u16 id, u8 trigger type, u8 detail, u32 trigger time ms. */
+    EventStarted = 0x81,
+    /** @brief An event finished recording and can be fetched: u16 id, u32 size, u8 trigger type. */
+    EventReady = 0x82,
+    /** @brief Reply to LIST, one per event: u16 id, u32 size (0 while recording), u8 trigger type, u8 complete. */
+    EventInfo = 0x83,
+    /** @brief End of a LIST reply: u16 number of events. */
+    ListEnd = 0x84,
+    /** @brief A transfer finished: u16 id, u32 total size. */
+    TransferDone = 0x85,
+    /** @brief Reply to DELETE: u16 id. */
+    Deleted = 0x86,
+    /** @brief A command failed: u8 @c ErrorCode, u16 id (0 if not about an event). */
+    Error = 0x87,
+};
+
+/** @brief Error codes in an ERROR message. */
+enum class ErrorCode : uint8_t {
+    /** @brief The command was malformed or unknown. */
+    BadCommand = 1,
+    /** @brief No such event, or it's still recording. */
+    NoSuchEvent = 2,
+    /** @brief Reading the event from flash failed. */
+    StorageError = 3,
+};
+
+/** @brief Start of every data notification; the event's bytes follow. */
+struct __attribute__((packed)) DataChunkHeader {
+    /** @brief Event being transferred. */
+    uint16_t eventId;
+    /** @brief Position of the payload in the event's byte stream. */
+    uint32_t offset;
+};
+static_assert(sizeof(DataChunkHeader) == 6, "DataChunkHeader must stay 6 bytes.");
+
+} // namespace ble_protocol
