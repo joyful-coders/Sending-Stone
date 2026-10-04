@@ -1,6 +1,6 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
-  import { onMount } from 'svelte';
+  import { onDestroy, onMount } from 'svelte';
   import { addActivity, getDB } from '$lib/db';
   import { watch } from '$lib/watch/watchClient.svelte';
 
@@ -38,8 +38,13 @@
   let showTestAlert = false;
   let testingAlert = false;
   let testAlertSent = false;
-  let message = '';
 
+  let showCheckIn = false;
+  let checkInStatus: 'idle' | 'pending' | 'safe' | 'help_requested' | 'missed' = 'idle';
+  let checkInSeconds = 30;
+  let checkInTimer: ReturnType<typeof setInterval> | undefined;
+
+  let message = '';
   let activity: ActivityEvent[] = [];
   let contacts: Contact[] = [];
   let plan: Plan | null = null;
@@ -111,6 +116,10 @@
     }
   });
 
+  onDestroy(() => {
+    clearCheckInTimer();
+  });
+
   function openTestAlert() {
     testAlertSent = false;
     showTestAlert = true;
@@ -159,6 +168,107 @@
       closeTestAlert();
     } finally {
       testingAlert = false;
+    }
+  }
+
+  function clearCheckInTimer() {
+    if (checkInTimer) {
+      clearInterval(checkInTimer);
+      checkInTimer = undefined;
+    }
+  }
+
+  function openCheckIn() {
+    clearCheckInTimer();
+    checkInStatus = 'idle';
+    checkInSeconds = 30;
+    showCheckIn = true;
+  }
+
+  function closeCheckIn() {
+    clearCheckInTimer();
+    showCheckIn = false;
+  }
+
+  async function startCheckIn() {
+    checkInStatus = 'pending';
+    checkInSeconds = 30;
+
+    try {
+      await addActivity(
+        'Check-in started',
+        'A 30-second prototype check-in was started.'
+      );
+
+      await loadDashboardData();
+
+      checkInTimer = setInterval(() => {
+        checkInSeconds -= 1;
+
+        if (checkInSeconds <= 0) {
+          clearCheckInTimer();
+          void markCheckInMissed();
+        }
+      }, 1000);
+    } catch (error) {
+      console.error('Could not start check-in:', error);
+
+      message = `Could not start check-in: ${
+        error instanceof Error ? error.message : String(error)
+      }`;
+
+      closeCheckIn();
+    }
+  }
+
+  async function markCheckInMissed() {
+    checkInStatus = 'missed';
+
+    try {
+      await addActivity(
+        'Check-in missed',
+        `No response was received. A simulated ${
+          plan?.alert_method?.toLowerCase() ?? 'support'
+        } alert would be prepared for trusted contacts.`
+      );
+
+      await loadDashboardData();
+    } catch (error) {
+      console.error('Could not save missed check-in:', error);
+    }
+  }
+
+  async function confirmSafe() {
+    clearCheckInTimer();
+    checkInStatus = 'safe';
+
+    try {
+      await addActivity(
+        'Check-in completed',
+        'The user confirmed they were okay. No alert was started.'
+      );
+
+      await loadDashboardData();
+    } catch (error) {
+      console.error('Could not save completed check-in:', error);
+    }
+  }
+
+  async function requestHelp() {
+    clearCheckInTimer();
+    checkInStatus = 'help_requested';
+
+    try {
+      await addActivity(
+        'Help requested',
+        `The user requested help. A simulated ${
+          plan?.alert_method?.toLowerCase() ?? 'support'
+        } alert would be prepared for trusted contacts.`
+      );
+
+      await loadDashboardData();
+    } catch (error) {
+      console.error('Could not save help request:', error);
     }
   }
 
@@ -272,6 +382,20 @@
       <button
         type="button"
         class="rounded-2xl border border-slate-800 bg-slate-900 p-5 text-left transition hover:border-indigo-400 hover:bg-slate-800"
+        onclick={openCheckIn}
+      >
+        <span class="text-2xl" aria-hidden="true">✓</span>
+
+        <span class="mt-4 block font-semibold">Check-in</span>
+
+        <span class="mt-1 block text-sm text-slate-400">
+          Start a timed safety check-in
+        </span>
+      </button>
+
+      <button
+        type="button"
+        class="rounded-2xl border border-slate-800 bg-slate-900 p-5 text-left transition hover:border-indigo-400 hover:bg-slate-800"
         onclick={openTestAlert}
       >
         <span class="text-2xl" aria-hidden="true">✉️</span>
@@ -285,7 +409,7 @@
 
       <button
         type="button"
-        class="rounded-2xl border border-slate-800 bg-slate-900 p-5 text-left transition hover:border-indigo-400 hover:bg-slate-800"
+        class="rounded-2xl border border-slate-800 bg-slate-900 p-5 text-left transition hover:border-indigo-400 hover:bg-slate-800 sm:col-span-2"
         onclick={() => goto('/private/privacy')}
       >
         <span class="text-2xl" aria-hidden="true">⚙️</span>
@@ -338,7 +462,7 @@
           <p class="font-medium">No activity yet</p>
 
           <p class="mt-1 text-sm text-slate-400">
-            Save an alert plan, add a contact, or run a test alert to create activity.
+            Save an alert plan, add a contact, run a check-in, or run a test alert to create activity.
           </p>
         </div>
       {:else}
@@ -363,8 +487,8 @@
     </section>
 
     <p class="mt-7 text-center text-xs leading-5 text-slate-500">
-      Prototype only. Test alerts are simulated and do not send texts, calls,
-      location, or emergency requests.
+      Prototype only. Check-ins and test alerts are simulated and do not send
+      texts, calls, location, or emergency requests.
     </p>
   </section>
 </main>
@@ -451,6 +575,133 @@
           {testingAlert ? 'Simulating…' : 'Run test alert'}
         </button>
       </div>
+    {/if}
+  </dialog>
+{/if}
+
+{#if showCheckIn}
+  <div class="fixed inset-0 z-40 bg-black/60"></div>
+
+  <dialog
+    open
+    class="fixed left-1/2 top-1/2 z-50 m-0 w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-2xl border-0 bg-white p-5 text-slate-900 shadow-2xl"
+    aria-labelledby="check-in-title"
+  >
+    {#if checkInStatus === 'idle'}
+      <p class="text-xs font-bold uppercase tracking-[0.16em] text-indigo-600">
+        Safety check-in
+      </p>
+
+      <h2 id="check-in-title" class="mt-1 text-xl font-bold">
+        Start a check-in
+      </h2>
+
+      <p class="mt-3 text-sm leading-6 text-slate-600">
+        This demo starts a 30-second timer. If there is no response, the app
+        prepares a simulated support alert. No real message, call, or location
+        sharing occurs.
+      </p>
+
+      <div class="mt-5 grid gap-3 sm:grid-cols-2">
+        <button
+          type="button"
+          class="rounded-xl border border-slate-300 px-4 py-3 font-semibold text-slate-700 hover:bg-slate-100"
+          onclick={closeCheckIn}
+        >
+          Cancel
+        </button>
+
+        <button
+          type="button"
+          class="rounded-xl bg-indigo-600 px-4 py-3 font-semibold text-white hover:bg-indigo-700"
+          onclick={startCheckIn}
+        >
+          Start check-in
+        </button>
+      </div>
+    {:else if checkInStatus === 'pending'}
+      <p class="text-xs font-bold uppercase tracking-[0.16em] text-indigo-600">
+        Check-in active
+      </p>
+
+      <h2 id="check-in-title" class="mt-1 text-xl font-bold">
+        Are you okay?
+      </h2>
+
+      <p class="mt-3 text-sm leading-6 text-slate-600">
+        Reply before the timer ends to cancel the planned support alert.
+      </p>
+
+      <div class="mt-4 rounded-xl bg-indigo-50 p-4 text-center">
+        <p class="text-xs font-bold uppercase tracking-[0.16em] text-indigo-600">
+          Time remaining
+        </p>
+
+        <p class="mt-1 text-4xl font-bold text-indigo-900">
+          00:{String(checkInSeconds).padStart(2, '0')}
+        </p>
+      </div>
+
+      <div class="mt-5 grid gap-3 sm:grid-cols-2">
+        <button
+          type="button"
+          class="rounded-xl border border-slate-300 px-4 py-3 font-semibold text-slate-700 hover:bg-slate-100"
+          onclick={requestHelp}
+        >
+          I need help
+        </button>
+
+        <button
+          type="button"
+          class="rounded-xl bg-emerald-600 px-4 py-3 font-semibold text-white hover:bg-emerald-700"
+          onclick={confirmSafe}
+        >
+          I’m okay
+        </button>
+      </div>
+    {:else if checkInStatus === 'safe'}
+      <p class="text-xs font-bold uppercase tracking-[0.16em] text-emerald-600">
+        Check-in complete
+      </p>
+
+      <h2 id="check-in-title" class="mt-1 text-xl font-bold">
+        You’re checked in
+      </h2>
+
+      <p class="mt-3 rounded-xl bg-emerald-50 p-4 text-sm leading-6 text-emerald-900">
+        You confirmed that you are okay. No alert was started.
+      </p>
+
+      <button
+        type="button"
+        class="mt-5 w-full rounded-xl bg-indigo-600 px-4 py-3 font-semibold text-white hover:bg-indigo-700"
+        onclick={closeCheckIn}
+      >
+        Done
+      </button>
+    {:else}
+      <p class="text-xs font-bold uppercase tracking-[0.16em] text-amber-600">
+        Support alert ready
+      </p>
+
+      <h2 id="check-in-title" class="mt-1 text-xl font-bold">
+        {checkInStatus === 'help_requested' ? 'Help requested' : 'Check-in missed'}
+      </h2>
+
+      <p class="mt-3 rounded-xl bg-amber-50 p-4 text-sm leading-6 text-amber-900">
+        A simulated {plan?.alert_method?.toLowerCase() ?? 'support'} alert is
+        ready for {contacts.length} trusted
+        {contacts.length === 1 ? 'contact' : 'contacts'}. No message, call, or
+        location was actually sent.
+      </p>
+
+      <button
+        type="button"
+        class="mt-5 w-full rounded-xl bg-indigo-600 px-4 py-3 font-semibold text-white hover:bg-indigo-700"
+        onclick={closeCheckIn}
+      >
+        Done
+      </button>
     {/if}
   </dialog>
 {/if}
