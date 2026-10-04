@@ -5,7 +5,12 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "datasets>=5.0.1",
     "detoxify>=0.5.2",
+    "evaluate>=0.4.6",
+    "pandas>=3.0.6",
     "prettyprint>=0.1.5",
+    "scikit-learn>=1.9.1",
     "spacy>=3.8.16",
+    "transformers[torch]>=5.18.0",
 ]
