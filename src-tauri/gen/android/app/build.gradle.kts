@@ -16,11 +16,11 @@ val tauriProperties = Properties().apply {
 
 android {
     compileSdk = 37
-    namespace = "com.joy.untitled"
+    namespace = "com.joy.sendingstone"
     defaultConfig {
         manifestPlaceholders["usesCleartextTraffic"] = "false"
-        applicationId = "com.joy.untitled"
-        minSdk = 26 // tauri-plugin-blec (Bluetooth) needs Android 8.0+
+        applicationId = "com.joy.sendingstone"
+        minSdk = 24
         targetSdk = 37
         versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
         versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")

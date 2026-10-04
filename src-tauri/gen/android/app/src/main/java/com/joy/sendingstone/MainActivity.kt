@@ -1,4 +1,4 @@
-package com.joy.untitled
+package com.joy.sendingstone
 
 import android.os.Bundle
 import androidx.activity.enableEdgeToEdge

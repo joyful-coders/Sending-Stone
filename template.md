@@ -1,0 +1,19 @@
+# Tauri + SvelteKit + TypeScript
+
+This template should help get you started developing with Tauri, SvelteKit and TypeScript in Vite.
+
+## Watch (Bluetooth)
+
+The app talks to the wrist-worn recorder in [`hardware/`](hardware/) over BLE (protocol in [`hardware/BLE_PROTOCOL.md`](hardware/BLE_PROTOCOL.md)). It's the app version of [`hardware-ble-test/ble_client.py`](hardware-ble-test/ble_client.py): it stays connected, raises an alert as soon as the watch reports a trigger, then downloads each recording, saves it and deletes it from the watch.
+
+- **Any board works.** The app scans for the watch's service UUID, so any board running the firmware can be chosen on the Watch page (`/private/watch`). The chosen board is remembered and reconnected to automatically.
+- **Bluetooth in the app** (Android APK, desktop) uses the native [`tauri-plugin-blec`](https://github.com/MnlPhlp/tauri-plugin-blec) plugin, because the Android WebView has no Web Bluetooth. **In a browser** (`npm run dev` in Chrome or Edge) it uses Web Bluetooth instead.
+- **Recordings** go to the app's private data folder, `events/<time>_event<id>_<trigger>/` (`audio.wav`, `motion.csv`, `meta.json`, `event.bin`), listed in the `watch_events` table. In a browser they're kept for the session, with download links.
+
+Code: [`src/lib/watch/`](src/lib/watch/) (`protocol.ts` the BLE protocol, `eventFormat.ts` decoding, `transport.ts` native/web BLE, `storage.ts` saving, `watchClient.svelte.ts` the connection).
+
+Build the APK with `npm run tauri android build` (needs the Android SDK/NDK and Rust Android targets, see the [Tauri Android prerequisites](https://v2.tauri.app/start/prerequisites/#android)). The plugin adds the Bluetooth permissions; the app asks for them the first time it searches.
+
+## Recommended IDE Setup
+
+[VS Code](https://code.visualstudio.com/) + [Svelte](https://marketplace.visualstudio.com/items?itemName=svelte.svelte-vscode) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer).

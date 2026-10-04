@@ -80,7 +80,7 @@
 </script>
 
 <svelte:head>
-  <title>untitled</title>
+  <title>Sending Stone</title>
   <meta name="description" content="Local chat prototype" />
 </svelte:head>
 
