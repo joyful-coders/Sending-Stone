@@ -93,7 +93,7 @@
         class="grid h-10 w-10 place-items-center rounded-full bg-indigo-600 text-sm font-bold text-white"
         aria-hidden="true"
       >
-        U
+        S
       </div>
 
       <div>
