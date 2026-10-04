@@ -15,7 +15,8 @@ export async function POST({ request }) {
 
   const result = await client.speechToText.convert({
     file,
-    modelId: 'scribe_v2'
+    modelId: 'scribe_v2',
+    diarize: true
   });
 
   return json({ text: result.text });

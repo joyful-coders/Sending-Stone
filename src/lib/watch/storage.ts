@@ -50,11 +50,25 @@ function folderName(stamp: Date, eventId: number, trigger: string) {
 
 async function ensureTable() {
   const db = await getDB();
-  await db.execute(`CREATE TABLE IF NOT EXISTS watch_events ( ... )`); // unchanged
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS watch_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      folder TEXT NOT NULL UNIQUE,
+      device_event_id INTEGER NOT NULL,
+      trigger TEXT NOT NULL,
+      label TEXT NOT NULL,
+      triggered_at TEXT NOT NULL,
+      audio_seconds REAL NOT NULL,
+      motion_samples INTEGER NOT NULL,
+      trigger_count INTEGER NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
 
+  // Migration: add the analysis columns to tables created before this change.
   const cols = await db.select<{ name: string }[]>('PRAGMA table_info(watch_events)');
   const have = new Set(cols.map((c) => c.name));
-  if (!have.has('transcript'))     await db.execute('ALTER TABLE watch_events ADD COLUMN transcript TEXT');
+  if (!have.has('transcript')) await db.execute('ALTER TABLE watch_events ADD COLUMN transcript TEXT');
   if (!have.has('toxicity_score')) await db.execute('ALTER TABLE watch_events ADD COLUMN toxicity_score REAL');
   if (!have.has('analysis_status'))
     await db.execute("ALTER TABLE watch_events ADD COLUMN analysis_status TEXT NOT NULL DEFAULT 'pending'");
@@ -235,4 +249,64 @@ export function sessionDownloads(folder: string): { name: string; url: string }[
 export function describeTrigger(trigger: string, label: string): string {
   const name = trigger.charAt(0).toUpperCase() + trigger.slice(1);
   return label && label !== trigger ? `${name} (${label})` : name;
+}
+
+//Manual Audio File import for dev testing
+/** Dev/demo: add a plain audio file as a recording (no watch needed). */
+export async function importAudioFile(file: File): Promise<SavedEvent> {
+  const buf = await file.arrayBuffer();
+
+  // Get the duration by decoding (works for wav/mp3/m4a/webm)
+  const ctx = new AudioContext();
+  const seconds = (await ctx.decodeAudioData(buf.slice(0))).duration;
+  await ctx.close();
+
+  const stamp = new Date();
+  const db = await ensureTable();
+  const base = folderName(stamp, 0, 'import');
+  let folder = base;
+  for (let n = 1; (await db.select<unknown[]>('SELECT 1 FROM watch_events WHERE folder = $1', [folder])).length; n++) {
+    folder = `${base}~${n}`;
+  }
+
+  const audio = new Blob([buf], { type: file.type || 'audio/wav' });
+
+  if (isTauri()) {
+    const options = { baseDir: BaseDirectory.AppData };
+    await mkdir(`events/${folder}`, { ...options, recursive: true });
+    await writeFile(`events/${folder}/audio.wav`, new Uint8Array(buf), options);
+  } else {
+    sessionFiles.set(folder, {
+      audio,
+      motion: new Blob([''], { type: 'text/csv' }),
+      meta: new Blob(['{}'], { type: 'application/json' }),
+      raw: new Blob([buf])
+    });
+    const res = await fetch(`/api/audio/${encodeURIComponent(folder)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'audio/wav' },
+      body: audio
+    });
+    if (!res.ok) throw new Error(`Audio upload failed (${res.status})`);
+  }
+
+  await db.execute(
+    `INSERT INTO watch_events (folder, device_event_id, trigger, label, triggered_at, audio_seconds, motion_samples, trigger_count)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    [folder, 0, 'import', 'import', stamp.toISOString(), seconds, 0, 1]
+  );
+
+  return {
+    folder,
+    deviceEventId: 0,
+    trigger: 'import',
+    label: 'import',
+    triggeredAt: stamp.toISOString(),
+    audioSeconds: seconds,
+    motionSamples: 0,
+    triggerCount: 1,
+    transcript: null,
+    toxicityScore: null,
+    analysisStatus: 'pending'
+  };
 }

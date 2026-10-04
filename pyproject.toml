@@ -8,9 +8,12 @@ dependencies = [
     "datasets>=5.0.1",
     "detoxify>=0.5.2",
     "evaluate>=0.4.6",
+    "fastapi>=0.142.2",
     "pandas>=3.0.6",
     "prettyprint>=0.1.5",
     "scikit-learn>=1.9.1",
     "spacy>=3.8.16",
+    "torch>=2.14.1",
     "transformers[torch]>=5.18.0",
+    "uvicorn>=0.54.0",
 ]

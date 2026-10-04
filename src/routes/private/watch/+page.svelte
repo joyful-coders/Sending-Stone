@@ -11,6 +11,8 @@
     sessionDownloads,
     type SavedEvent
   } from '$lib/watch/storage';
+  import { importAudioFile } from '$lib/watch/storage';
+  import { analyzeEvent } from '$lib/watch/analyze';
 
   let events = $state<SavedEvent[]>([]);
   let playing = $state<{ folder: string; url: string } | null>(null);
@@ -74,6 +76,22 @@
   function percent(t: { received: number; size: number }) {
     return Math.floor((100 * t.received) / Math.max(t.size, 1));
   }
+
+  //On import for file importing DEV TEST STUFF
+  async function onImport(e: Event) {
+  const input = e.currentTarget as HTMLInputElement;
+  const files = Array.from(input.files ?? []);
+  input.value = '';
+  for (const file of files) {
+    try {
+      const saved = await importAudioFile(file);
+      analysis.version++;      // show the new card right away as "Analyzing…"
+      void analyzeEvent(saved); // bumps analysis.version again when finished
+    } catch (err) {
+      message = `Import failed: ${err instanceof Error ? err.message : String(err)}`;
+    }
+  }
+}
 </script>
 
 <svelte:head>
@@ -213,6 +231,11 @@
     <section class="mt-7">
       <p class="text-xs font-bold uppercase tracking-[0.16em] text-slate-400">Recordings</p>
       <h2 class="mt-1 text-xl font-semibold">From the watch</h2>
+
+      <label class="mt-3 inline-block cursor-pointer rounded-lg bg-slate-800 px-3 py-1.5 text-sm hover:bg-slate-700">
+         Import audio file
+        <input type="file" accept="audio/*" multiple class="hidden" onchange={onImport} />
+      </label>  
 
       {#if events.length === 0}
         <div class="mt-3 rounded-2xl border border-dashed border-slate-700 bg-slate-900 p-5">
