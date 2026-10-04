@@ -50,3 +50,4 @@ uv.lock
 /.venv
 uv.lock
 distilbert*
+package-lock.json
