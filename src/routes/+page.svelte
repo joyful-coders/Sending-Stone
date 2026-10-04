@@ -48,9 +48,7 @@
     const text = input.trim();
 
     if (!text) return;
-
-    // Development-only route trigger.
-    // Later, make this user-configured and keep it out of visible help text.
+    
     if (text === '/open') {
       input = '';
       await goto('/private');
@@ -68,7 +66,6 @@
 
     input = '';
 
-    // Small delay so the reply feels like a response instead of instantly appearing.
     window.setTimeout(() => {
       messages = [
         ...messages,
@@ -100,7 +97,7 @@
       </div>
 
       <div>
-        <h1 class="font-semibold">untitled</h1>
+        <h1 class="font-semibold">Sending Stone</h1>
         <p class="text-sm text-slate-500">Local assistant</p>
       </div>
     </header>
