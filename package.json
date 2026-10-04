@@ -14,8 +14,11 @@
   },
   "license": "MIT",
   "dependencies": {
+    "@elevenlabs/elevenlabs-js": "^2.70.0",
     "@tauri-apps/api": "^2",
-    "@tauri-apps/plugin-opener": "^2"
+    "@tauri-apps/plugin-opener": "^2",
+    "dotenv": "^18.0.5",
+    "elevenlabs-js": "^1.2.6"
   },
   "devDependencies": {
     "@sveltejs/adapter-static": "^3.0.10",
