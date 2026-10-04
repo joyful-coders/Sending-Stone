@@ -1,22 +1,30 @@
 /**
  * @file sound.cpp
  *
- * @brief Implementation of the analog sound sensor module.
+ * @brief Implementation of the onboard microphone loudness module.
  *
  * @details
- * A cooperative @c Thread averages a burst of ADC reads every @c
- * sound_config::kThreadRefreshIntervalMs to smooth out the sensor's noise, and
- * keeps the newest averaged level for other modules to read via @c
- * getLatestSoundReading().
+ * The IM69D130 microphone streams PDM audio into the NDP120, which buffers it
+ * as 16 kHz, 16-bit mono PCM. A cooperative @c Thread extracts the newest
+ * chunk every @c sound_config::kThreadRefreshIntervalMs and reduces it to one
+ * RMS amplitude, kept for other modules to read via @c getLatestSoundReading().
+ * Audio between ticks is skipped, which is fine for a loudness level.
+ *
+ * The chunk buffer is allocated once, at exactly the size the NDP reports,
+ * rather than reserved statically at a worst-case size.
  *
  */
 
 #include <Arduino.h>
-#include <Thread.h>
+#include <math.h>
+#include <new>
+#include <NDP.h>
 
 #include "sound.h"
-#include "configs.h"
-#include "logger.h"
+#include "../ndp/ndp_module.h"
+#include "../configs.h"
+#include "../logger.h"
+#include "../module_utils.h"
 
 /**
  * @defgroup Private
@@ -25,18 +33,14 @@
  * @{
  */
 namespace {
-/** @brief Timestamp for adding debug logs for the sound loop */
-unsigned long nowLoop = 0;
-
-/** @brief Whether @c startSoundModule() succeeded. */
-bool started = false;
-/** @brief Whether @c latestReading holds at least one sample. */
-bool hasReading = false;
 /** @brief The newest sample taken by @c soundTick(). */
-SoundReading latestReading = {};
+LatestReading<SoundReading> latest;
+
+/** @brief Buffer one extracted audio chunk lands in, sized in @c startSoundModule(). Never freed. */
+uint8_t* audioBuffer = nullptr;
 
 /**
- * @brief One cooperative thread tick, averaging a burst of ADC reads.
+ * @brief One cooperative thread tick, reducing the newest audio chunk to an RMS level.
  *
  * @par Parameters
  * None.
@@ -46,20 +50,40 @@ SoundReading latestReading = {};
  *
  */
 void soundTick() {
-    uint32_t sum = 0;
-    for (uint8_t i = 0; i < sound_config::kSamplesPerReading; ++i) {
-        sum += analogRead(sound_config::kSoundPin);
+    unsigned int len = 0;
+    if (NDP.extractData(audioBuffer, &len) || len < sizeof(int16_t)) return; // no new chunk yet
+
+    const int16_t* samples = reinterpret_cast<const int16_t*>(audioBuffer);
+    size_t count = len / sizeof(int16_t);
+
+    uint64_t sumSquares = 0;
+    for (size_t i = 0; i < count; ++i) {
+        int32_t s = samples[i];
+        sumSquares += static_cast<uint64_t>(s * s);
     }
 
-    latestReading.level = sum / sound_config::kSamplesPerReading;
-    latestReading.timestampMs = millis();
-    hasReading = true;
+    float rms = sqrtf(static_cast<float>(sumSquares) / count);
+    latest.store(SoundReading{rms > 32767.0f ? uint16_t(32767) : static_cast<uint16_t>(rms + 0.5f), millis()});
 }
 
-/** @brief Thread for sampling the sound sensor. */
-Thread soundThread = Thread([]() {
-    soundTick();
-});
+/**
+ * @brief One logging tick, queuing the newest sample.
+ *
+ * @par Parameters
+ * None.
+ *
+ * @par Returns
+ * Nothing.
+ *
+ */
+void soundLogTick() {
+    if (latest.valid()) debug_logs::soundLogging("Level %u", latest.value().level);
+}
+
+/** @brief Thread for sampling the microphone. */
+Thread soundThread = makeIdleThread(soundTick, sound_config::kThreadRefreshIntervalMs);
+/** @brief Thread for periodically logging the newest sample. */
+Thread soundLogThread = makeIdleThread(soundLogTick, debug_config::kSoundLoopDelay);
 
 } // namespace
 /** @} */ // end of Private
@@ -70,34 +94,42 @@ Thread soundThread = Thread([]() {
  * @{
  */
 bool startSoundModule() {
-    if (digitalPinToAnalogChannel(sound_config::kSoundPin) < 0) {
-        debug_logs::soundLogging("Pin %u is not ADC capable.", sound_config::kSoundPin);
+    if (!isNDPReady()) {
+        debug_logs::soundLogging("NDP is not ready, the microphone is unreachable.");
         return false;
     }
 
-    pinMode(sound_config::kSoundPin, INPUT);
+    if (NDP.turnOnMicrophone()) {
+        debug_logs::soundLogging("Failed to turn on the microphone.");
+        return false;
+    }
 
-    soundThread.setInterval(sound_config::kThreadRefreshIntervalMs);
-    started = true;
+    int chunkBytes = NDP.getAudioChunkSize();
+    if (chunkBytes <= 0) {
+        debug_logs::soundLogging("The NDP reported no audio chunk size.");
+        return false;
+    }
 
-    debug_logs::soundLogging("Started sound module on pin %u.", sound_config::kSoundPin);
+    // Rounded up to whole 32-bit words: the NDP's SPI reads write in 4-byte units.
+    audioBuffer = new (std::nothrow) uint8_t[(chunkBytes + 3) & ~3];
+    if (audioBuffer == nullptr) {
+        debug_logs::soundLogging("Not enough memory for a %d byte audio chunk.", chunkBytes);
+        return false;
+    }
+
+    soundThread.enabled = true;
+    soundLogThread.enabled = true;
+
+    debug_logs::soundLogging("Started sound module (%d byte audio chunks).", chunkBytes);
     return true;
 }
 
 void updateSoundModule() {
-    if (!started) return;
-
-    if (soundThread.shouldRun()) soundThread.run();
-
-    if (hasReading && millis() - nowLoop >= debug_config::kSoundLoopDelay) {
-        debug_logs::soundLogging("Level %u", latestReading.level);
-        nowLoop = millis();
-    }
+    runIfDue(soundThread);
+    runIfDue(soundLogThread);
 }
 
 bool getLatestSoundReading(SoundReading& reading) {
-    if (!started || !hasReading) return false;
-    reading = latestReading;
-    return true;
+    return latest.copyTo(reading);
 }
 /** @} */ // end of Public

@@ -7,26 +7,50 @@
 
 #include <cstdint>
 
-/** @brief Enumerates the possible states for the status LED. */
-enum class BlinkState : int8_t {
-	/** @brief Device is starting up, before any module has succeeded or failed. */
-	Setup,
-	/** @brief The MPU6050 IMU failed to initialize. */
-	IMUFail,
-	/** @brief The sound sensor failed to initialize. */
-	SoundFail,
-	/** @brief The BLE stack, GATT server, or advertising failed to start. */
-	BLEFail,
-	/** @brief Every module started successfully, device is running normally. */
-	Idle,
+/**
+ * @brief Every status LED state, as X(name, color, failed, log message).
+ *
+ * @details
+ * The single source of truth for the status LED: expanded here into @c
+ * BlinkState, and in led_handler.cpp into the pattern table. Each state's
+ * blink timing is the @c k<name>Pattern array in led_handler.cpp. @c failed
+ * states make @c inFailedState() true. To add a state, add a line here and its
+ * pattern there.
+ *
+ * | State     | LED                            |
+ * |-----------|--------------------------------|
+ * | Setup     | blue blink                     |
+ * | NDPFail   | slow magenta blink             |
+ * | IMUFail   | two red blinks                 |
+ * | MagFail   | three red blinks               |
+ * | SoundFail | slow yellow blink              |
+ * | BLEFail   | long then short blue blink     |
+ * | Idle      | short green blip every 2 s     |
+ *
+ */
+#define BLINK_STATES(X)                                                   \
+    X(Setup,     blue,    false, "Device is starting up...")              \
+    X(NDPFail,   magenta, true,  "NDP120 failed to load its firmware.")   \
+    X(IMUFail,   red,     true,  "BMI270 failed to initialize.")          \
+    X(MagFail,   red,     true,  "BMM150 failed to initialize.")          \
+    X(SoundFail, yellow,  true,  "Microphone failed to start.")           \
+    X(BLEFail,   blue,    true,  "BLE failed to start.")                  \
+    X(Idle,      green,   false, "Device is idle.")
+
+/** @brief Enumerates the possible states for the status LED, generated from @c BLINK_STATES. */
+enum class BlinkState : uint8_t {
+#define X(name, color, failed, message) name,
+    BLINK_STATES(X)
+#undef X
 };
 
 /**
- * @brief Start the status LED module and initialize the LED patterns.
+ * @brief Start the status LED module.
  *
  * @details
- * Configures the LED GPIO pin and registers each @c BlinkState's pattern
- * runner. Call once during @c setup(), before @c setStatusState().
+ * Starts the onboard RGB LED driver (over I2C, so call after @c
+ * nicla::begin()) and the module's cooperative thread. Call once during @c
+ * setup(), before @c setStatusState().
  *
  * @par Parameters
  * None.
@@ -39,37 +63,35 @@ enum class BlinkState : int8_t {
 bool startStatusLED();
 
 /**
- * @brief Set the current state of the status LED to control its blinking pattern.
+ * @brief Switch the status LED to a new state's pattern.
  *
  * @details
- * Resets the new state's pattern so it starts from its first step rather than
- * wherever the previous state's pattern was left off.
+ * Restarts the pattern from its first ("on") step immediately and queues the
+ * state's log message once. The state is recorded even when the light is
+ * disabled, so @c inFailedState() always reflects it.
  *
  * @param state The desired state for the status LED.
  *
- * @return The status of the state change attempt.
- * @retval true The state was changed successfully.
- * @retval false The LED module is disabled and is not running.
+ * @return Whether the LED itself was updated.
+ * @retval true The LED now shows the new state.
+ * @retval false The LED module is disabled, only the state was recorded.
  *
  */
 bool setStatusState(BlinkState state);
 
 /**
- * @brief Update the status LED based on its current state.
+ * @brief Advance the status LED's pattern, if its thread is due.
  *
  * @details
- * Call regularly from the main loop. Advances the current state's LED pattern
- * only once per @c led_config::kThreadRefreshIntervalMs, via the module's
- * cooperative thread.
- *
- * @note
- * This runs on its own thread, independent of the main thread.
+ * Call regularly from the main loop. Checks the current step once per @c
+ * led_config::kThreadRefreshIntervalMs, and writes the LED (over I2C) only
+ * when a step changes.
  *
  * @par Parameters
  * None.
  *
  * @return The status of the LED update attempt.
- * @retval true The LED was updated based on its current state.
+ * @retval true The LED module is running.
  * @retval false The LED module is disabled and is not running.
  *
  */
@@ -81,9 +103,7 @@ bool updateStatusLED();
  * @par Parameters
  * None.
  *
- * @return The status of the failed state check.
- * @retval true The LED is in a failed state.
- * @retval false The LED is not in a failed state.
+ * @return Whether the current state is marked failed in @c BLINK_STATES.
  *
  */
 bool inFailedState();

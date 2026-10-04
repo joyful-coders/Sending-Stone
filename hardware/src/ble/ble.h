@@ -6,34 +6,35 @@
 #pragma once
 
 /**
- * @brief Start the BLE module, its GATT server, and advertising.
+ * @brief Start the BLE module, its GATT service, and advertising.
  *
  * @details
- * Initializes NimBLE as @c ble_config::kDeviceName, creates the sensor data
+ * Starts ArduinoBLE as @c ble_config::kDeviceName, adds the sensor data
  * service with its readings (READ + NOTIFY) and version (READ)
  * characteristics, then starts advertising the service UUID so clients can
- * find the device. Advertising restarts automatically whenever a client
+ * find the device. Advertising resumes automatically whenever a client
  * disconnects. See ble_protocol.h for the packet format.
  *
  * @par Parameters
  * None.
  *
  * @return The status of the BLE module startup attempt.
- * @retval true The GATT server is up and the device is advertising.
- * @retval false NimBLE failed to initialize, or the server or advertising failed to start.
+ * @retval true The service is up and the device is advertising.
+ * @retval false The BLE stack failed to start, or advertising failed to start.
  *
  */
 bool startBLEModule();
 
 /**
- * @brief Run the BLE notify thread tick, if it is due.
+ * @brief Service the BLE stack and run the notify thread tick, if it is due.
  *
  * @details
- * Call regularly from the main loop. Once every @c
- * ble_config::kNotifyIntervalMs, while at least one client is connected, packs
- * the latest IMU and sound readings into one @c SensorPacket and notifies it on
- * the readings characteristic. Also logs connection changes and, every @c
- * debug_config::kBLELoopDelay, the connected client and sent packet counts.
+ * Call every main loop iteration, since it also runs @c BLE.poll(), which
+ * processes connection events. Once every @c ble_config::kNotifyIntervalMs,
+ * while a client is subscribed, packs every sensor's latest reading into one
+ * @c SensorPacket and notifies it on the readings characteristic. Also logs
+ * connection changes and, every @c debug_config::kBLELoopDelay, the connected
+ * client and sent packet counts.
  *
  * @par Parameters
  * None.

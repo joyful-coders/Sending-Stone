@@ -1,0 +1,77 @@
+{
+    // Build / flash / monitor the Nicla Voice with the arduino-cli bundled in Arduino IDE 2.
+    // Run with Ctrl+Shift+B (Build), or Terminal > Run Task... for the others.
+    "version": "2.0.0",
+    "options": {
+        "cwd": "${workspaceFolder}",
+        "env": {
+            "ARDUINO_CLI": "${env:LOCALAPPDATA}\\Programs\\Arduino IDE\\resources\\app\\lib\\backend\\resources\\arduino-cli.exe",
+            "OPENOCD_DIR": "${env:LOCALAPPDATA}\\Arduino15\\packages\\arduino\\tools\\openocd\\0.11.0-arduino2"
+        }
+    },
+    "inputs": [
+        {
+            "id": "port",
+            "type": "promptString",
+            "description": "Nicla Voice serial port (see 'Nicla: List Ports')",
+            "default": "COM8"
+        }
+    ],
+    "tasks": [
+        {
+            "label": "Nicla: Build",
+            "type": "shell",
+            "command": "& $env:ARDUINO_CLI compile --profile nicla_voice .",
+            "options": { "shell": { "executable": "powershell.exe", "args": ["-NoProfile", "-Command"] } },
+            "group": { "kind": "build", "isDefault": true },
+            "problemMatcher": ["$gcc"]
+        },
+        {
+            "label": "Nicla: Upload",
+            "type": "shell",
+            "command": "& $env:ARDUINO_CLI compile --profile nicla_voice --upload -p ${input:port} .",
+            "options": { "shell": { "executable": "powershell.exe", "args": ["-NoProfile", "-Command"] } },
+            "problemMatcher": ["$gcc"]
+        },
+        {
+            // Same OpenOCD steps as the core's uploader, but at 1 MHz SWD instead of 10 MHz,
+            // plus a verify. Use when "Nicla: Upload" fails with flash write errors.
+            "label": "Nicla: Upload (slow)",
+            "type": "shell",
+            "command": "& $env:ARDUINO_CLI compile --profile nicla_voice --build-path build . ; if ($?) { & \"$env:OPENOCD_DIR\\bin\\openocd.exe\" -s \"$env:OPENOCD_DIR\\share\\openocd\\scripts\" -f interface/cmsis-dap.cfg -c 'transport select swd; adapter speed 1000' -f target/nrf52.cfg -c 'telnet_port disabled; init; reset init; halt; program {build/hardware.ino.elf} verify; reset run; shutdown' }",
+            "options": { "shell": { "executable": "powershell.exe", "args": ["-NoProfile", "-Command"] } },
+            "problemMatcher": ["$gcc"]
+        },
+        {
+            // Step 1 of restoring the NDP120 firmware: flash tools/ndp_provision (the core ymodem uploader, made reliable and verbose).
+            "label": "Nicla: Flash NDP Provisioner",
+            "type": "shell",
+            "command": "& $env:ARDUINO_CLI compile -b arduino:mbed_nicla:nicla_voice --build-path build/provision tools/ndp_provision ; if ($?) { & \"$env:OPENOCD_DIR\\bin\\openocd.exe\" -s \"$env:OPENOCD_DIR\\share\\openocd\\scripts\" -f interface/cmsis-dap.cfg -c 'transport select swd; adapter speed 1000' -f target/nrf52.cfg -c 'telnet_port disabled; init; reset init; halt; program {build/provision/ndp_provision.ino.elf} verify; reset run; shutdown' }",
+            "options": { "shell": { "executable": "powershell.exe", "args": ["-NoProfile", "-Command"] } },
+            "problemMatcher": ["$gcc"]
+        },
+        {
+            // Step 2: format the external flash and send the .synpkg files (see tools/upload-ndp-firmware.ps1).
+            "label": "Nicla: Upload NDP Firmware",
+            "type": "shell",
+            "command": "& .\\tools\\upload-ndp-firmware.ps1 -Port ${input:port}",
+            "options": { "shell": { "executable": "powershell.exe", "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"] } },
+            "problemMatcher": []
+        },
+        {
+            "label": "Nicla: Monitor",
+            "type": "shell",
+            "command": "& $env:ARDUINO_CLI monitor -p ${input:port} -c baudrate=115200",
+            "options": { "shell": { "executable": "powershell.exe", "args": ["-NoProfile", "-Command"] } },
+            "isBackground": true,
+            "problemMatcher": []
+        },
+        {
+            "label": "Nicla: List Ports",
+            "type": "shell",
+            "command": "& $env:ARDUINO_CLI board list",
+            "options": { "shell": { "executable": "powershell.exe", "args": ["-NoProfile", "-Command"] } },
+            "problemMatcher": []
+        }
+    ]
+}

@@ -13,76 +13,57 @@
 #include <stdio.h>
 
 namespace debug_logs {
-/** @brief Maximum number of log messages that can be queued. */
-constexpr uint8_t kMaxMessages = 32;
-/** @brief Maximum size, in bytes, of each log message. */
-constexpr uint8_t kMessageSize = 128;
+/** @brief Maximum number of log messages that can be queued. Kept small, the nRF52832 has 64 KB of RAM. */
+constexpr uint8_t kMaxMessages = 16;
+/** @brief Maximum size, in bytes, of each message body (the prefix is stored separately). */
+constexpr uint8_t kMessageSize = 96;
 
-/** @brief A single queued, null terminated log message. */
+/** @brief A single queued log message. */
 struct LogMessage {
-    /** @brief Formatted, prefixed message text. */
+    /** @brief Module prefix, such as "[IMU]". Points at a string literal from configs.h, never copied. */
+    const char* prefix;
+    /** @brief Formatted, null terminated message body. */
     char text[kMessageSize];
 };
 
-/** @brief Ring buffer holding queued log messages. */
-inline LogMessage queue[kMaxMessages];
-/** @brief Index of the next slot @c pushLog() will write to. */
-inline volatile uint8_t head = 0;
-/** @brief Index of the next slot @c popLog() will read from. */
-inline volatile uint8_t tail = 0;
+/** @brief Ring buffer holding queued log messages, defined in logger.cpp. */
+extern LogMessage queue[kMaxMessages];
+/** @brief Index of the next slot @c pushLog() will write to, defined in logger.cpp. */
+extern uint8_t head;
+/** @brief Index of the next slot @c flushLogs() will print, defined in logger.cpp. */
+extern uint8_t tail;
+/** @brief Messages rejected because the queue was full since the last flush, defined in logger.cpp. */
+extern uint16_t dropped;
 
 /**
- * @brief Push a formatted, prefixed message into the log queue.
+ * @brief Format a message straight into the next free queue slot.
  *
  * @details
- * Formats @p fmt / @p args into a scratch buffer, prepends @p prefix, and
- * writes the result into the queue slot at @c head. The queue is a fixed-size
- * ring buffer with no dynamic allocation, so a full queue simply rejects the
- * new message rather than growing.
+ * The queue is a fixed-size ring buffer with no dynamic allocation, so a full
+ * queue rejects the new message (counted in @c dropped) rather than growing.
+ * Only the main loop logs, so no locking is needed.
  *
- * @param prefix Text prepended to the message, such as "[IMU]".
+ * @param prefix Module prefix, such as "[IMU]". Must outlive the queue (a string literal).
  * @param fmt Printf style format string for the message body.
  * @param args Variable argument list matching @p fmt.
  *
  * @return Whether the message was queued.
  * @retval true The message was queued.
- * @retval false The queue was full and the message was dropped or verbose logging is disabled.
+ * @retval false The queue was full and the message was dropped, or verbose logging is disabled.
  *
  */
 inline bool pushLog(const char *prefix, const char *fmt, va_list args) {
     if (!debug_config::kEnableVerboseLogging) return false;
     uint8_t nextHead = (head + 1) % kMaxMessages;
 
-    // Buffer full
-    if (nextHead == tail) return false;
+    if (nextHead == tail) {
+        dropped++;
+        return false;
+    }
 
-    char buffer[kMessageSize - 16]; // Leave space for prefix and null terminator
-    vsnprintf(buffer, sizeof(buffer), fmt, args);
-
-    snprintf(queue[head].text, sizeof(queue[head].text), "%s %s", prefix, buffer);
-
+    queue[head].prefix = prefix;
+    vsnprintf(queue[head].text, kMessageSize, fmt, args);
     head = nextHead;
-    return true;
-}
-
-/**
- * @brief Pop the oldest queued log message.
- *
- * @param msg Destination that receives the popped message.
- *
- * @return Whether a message was popped.
- * @retval true A message was popped into @p msg.
- * @retval false The queue was empty or verbose logging is disabled.
- *
- * @see pushLog()
- *
- */
-inline bool popLog(LogMessage &msg) {
-    if (!debug_config::kEnableVerboseLogging) return false;
-    if (tail == head) return false;
-
-    msg = queue[tail];
-    tail = (tail + 1) % kMaxMessages;
     return true;
 }
 
@@ -90,14 +71,13 @@ inline bool popLog(LogMessage &msg) {
  * @brief Print every queued log message to Serial, then clear the queue.
  *
  * @details
- * Prints @p separator, an uptime header, then pops and prints every message
- * currently in the queue in order. Intended to be called periodically from the
- * main loop rather than from inside @c pushLog(), so Serial output stays
- * batched. Skipped entirely when verbose logging is disabled, since Serial
- * itself is never started in that case.
+ * Prints @p separator, an uptime header (plus a dropped count, if any), then
+ * every queued message in order, straight from the queue. Intended to be
+ * called periodically from the main loop rather than from inside @c
+ * pushLog(), so Serial output stays batched. Skipped entirely when verbose
+ * logging is disabled, since Serial itself is never started in that case.
  *
- * @param separator Line printed before the uptime header, once per
- * flush.
+ * @param separator Line printed before the uptime header, once per flush.
  *
  * @return Whether any messages were printed.
  * @retval true One or more messages were printed.
@@ -109,13 +89,23 @@ inline bool flushLogs(const char *separator = "---------------------------------
     if (head == tail) return false; // No messages to flush
 
     Serial.println(separator);
-    unsigned long timestamp = millis();
-    char formatedTime[64];
-    snprintf(formatedTime, sizeof(formatedTime), "Hours: %lu Minutes: %lu Seconds: %lu", (timestamp/1000/60/60)%24, (timestamp/1000/60)%60, (timestamp/1000)%60);
-    Serial.println(formatedTime);
+    unsigned long seconds = millis() / 1000;
+    char header[64];
+    snprintf(header, sizeof(header), "Hours: %lu Minutes: %lu Seconds: %lu", (seconds / 3600) % 24, (seconds / 60) % 60, seconds % 60);
+    Serial.print(header);
+    if (dropped > 0) {
+        Serial.print(" (");
+        Serial.print(dropped);
+        Serial.print(" dropped)");
+        dropped = 0;
+    }
+    Serial.println();
 
-    LogMessage msg;
-    while (popLog(msg)) Serial.println(msg.text);
+    for (; tail != head; tail = (tail + 1) % kMaxMessages) {
+        Serial.print(queue[tail].prefix);
+        Serial.print(' ');
+        Serial.println(queue[tail].text);
+    }
     return true;
 }
 
@@ -147,9 +137,12 @@ inline bool flushLogs(const char *separator = "---------------------------------
         return result;                              \
     }
 
-    DEFINE_LOGGER(ledLogging,   debug_config::kEnableLEDLogging,   debug_config::kLEDPrefix)
-    DEFINE_LOGGER(imuLogging,   debug_config::kEnableIMULogging,   debug_config::kIMUPrefix)
-    DEFINE_LOGGER(soundLogging, debug_config::kEnableSoundLogging, debug_config::kSoundPrefix)
-    DEFINE_LOGGER(bleLogging,   debug_config::kEnableBLELogging,   debug_config::kBLEPrefix)
+    DEFINE_LOGGER(ledLogging,     debug_config::kEnableLEDLogging,     debug_config::kLEDPrefix)
+    DEFINE_LOGGER(ndpLogging,     debug_config::kEnableNDPLogging,     debug_config::kNDPPrefix)
+    DEFINE_LOGGER(imuLogging,     debug_config::kEnableIMULogging,     debug_config::kIMUPrefix)
+    DEFINE_LOGGER(magLogging,     debug_config::kEnableMagLogging,     debug_config::kMagPrefix)
+    DEFINE_LOGGER(soundLogging,   debug_config::kEnableSoundLogging,   debug_config::kSoundPrefix)
+    DEFINE_LOGGER(batteryLogging, debug_config::kEnableBatteryLogging, debug_config::kBatteryPrefix)
+    DEFINE_LOGGER(bleLogging,     debug_config::kEnableBLELogging,     debug_config::kBLEPrefix)
 #undef DEFINE_LOGGER
 } // namespace debug_logs

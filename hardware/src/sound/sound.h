@@ -7,27 +7,29 @@
 
 #include <cstdint>
 
-/** @brief One averaged sample from the sound sensor. */
+/** @brief One loudness sample from the onboard microphone. */
 struct SoundReading {
-    /** @brief Raw ADC level averaged over @c sound_config::kSamplesPerReading reads. */
+    /** @brief RMS amplitude of one audio chunk of 16-bit PCM, 0 (silence) to 32767 (full scale). */
     uint16_t level;
     /** @brief millis() timestamp the sample was taken at. */
     unsigned long timestampMs;
 };
 
 /**
- * @brief Start the sound module and configure its analog pin.
+ * @brief Start the sound module and the onboard IM69D130 microphone.
  *
  * @details
- * Verifies @c sound_config::kSoundPin is ADC capable, sets it as an input, and
- * starts the module's sampling thread.
+ * The microphone is a PDM device feeding the NDP120, so this requires @c
+ * startNDPModule() to have succeeded. Turns the microphone on, allocates a
+ * buffer of exactly one audio chunk (the size the NDP reports), and starts the
+ * module's sampling thread.
  *
  * @par Parameters
  * None.
  *
  * @return The status of the sound module startup attempt.
- * @retval true The pin was configured and sampling started.
- * @retval false @c sound_config::kSoundPin is not an ADC capable pin.
+ * @retval true The microphone is on and audio chunks can be extracted.
+ * @retval false The NDP isn't ready, the microphone failed to start, or there's no memory for the buffer.
  *
  */
 bool startSoundModule();
@@ -37,10 +39,10 @@ bool startSoundModule();
  *
  * @details
  * Call regularly from the main loop. Once every @c
- * sound_config::kThreadRefreshIntervalMs, averages @c
- * sound_config::kSamplesPerReading ADC reads into the module's latest reading,
- * see @c getLatestSoundReading(). Periodically logs that reading every @c
- * debug_config::kSoundLoopDelay.
+ * sound_config::kThreadRefreshIntervalMs, extracts the newest audio chunk
+ * (16 kHz, 16-bit mono PCM) from the NDP and stores its RMS amplitude as the
+ * module's latest reading, see @c getLatestSoundReading(). Periodically logs
+ * that reading every @c debug_config::kSoundLoopDelay.
  *
  * @par Parameters
  * None.
