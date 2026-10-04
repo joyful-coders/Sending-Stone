@@ -8,7 +8,8 @@ Firmware for the [Arduino Nicla Voice](https://docs.arduino.cc/hardware/nicla-vo
 - **Triggers** (`trigger_config`):
   - **Keyword** recognized by the NDP120 (currently the stock model's "Alexa", as a stand-in)
   - **Jolt**: total acceleration >= 4 g or rotation >= 700 dps (starting guesses, tune with data)
-  - **Manual**: the client's TRIGGER command (and later a button)
+  - **Button**: a push button between the header's CIPO pin (D7, J1 pin 5) and GND (internal pull-up, nothing else to wire; pin set by `kButtonPin`)
+  - **Manual**: the client's TRIGGER command
 - **Events:** a trigger keeps the pre-trigger buffer and records 50 s more; further triggers extend it (up to 3 min). Up to 16 events are stored (fewer if they are long: the oldest are deleted to keep room for the next one), survive power loss, and wait for a client
 - **BLE store-and-forward:** an immediate EVENT_STARTED alert, then a resumable chunked download, see [BLE_PROTOCOL.md](BLE_PROTOCOL.md). The Python client in `../hardware-ble-test/` saves each event as WAV + CSV + JSON
 - **BMI270** at ±16 g / ±2000 dps so strikes aren't clipped
@@ -35,7 +36,7 @@ The IMU and microphone are not wired to the nRF52832 directly. They sit behind t
 - `src/imu/` - samples the BMI270 at 50 Hz and hands each raw sample to its handlers
 - `src/audio/` - extracts every 16 kHz audio chunk from the NDP and tracks loudness
 - `src/recorder/` - the rolling buffer and event storage on flash (`event_format.h` is an event's byte format, `adpcm.h` the audio encoder, `nor_flash.*` a fast driver for the external flash)
-- `src/trigger/` - keyword, jolt, and manual triggers
+- `src/trigger/` - keyword, jolt, button, and manual triggers
 - `src/ble/` - the GATT service and event transfer (`ble_protocol.h` is the command/message format)
 - `sketch.yaml` - Arduino CLI profile pinning the board, core, and library versions
 - `../hardware-ble-test/` - Python client: listens for events, downloads and decodes them into `output/`
@@ -106,7 +107,7 @@ Everything lives in `src/configs.h`, grouped by namespace:
 
 - `imu_config::kAccelRangeG` / `kGyroRangeDps` - BMI270 ranges (default ±8 g, ±1000 °/s)
 - `recorder_config` - segment length, pre/post-trigger windows (10 s / 50 s), maximum event length, stored event count
-- `trigger_config` - which triggers are on, and the jolt thresholds and cooldown
+- `trigger_config` - which triggers are on, the jolt thresholds and cooldown, and the button pin
 - `imu_config` - BMI270 ranges and the 50 Hz sample interval
 - `ble_config::kDeviceName` and the service/characteristic UUIDs
 - `main_config::kFailureRebootDelayMs` - how long a normal build waits before rebooting after a failed start

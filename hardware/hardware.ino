@@ -219,7 +219,7 @@ void setup() {
   // also starts a thread whose 768-byte stack comes off the heap, and BLE
   // needs every byte (see startModules()). pingPmic() replaces that thread.
   // The PMIC's LDO powers the header pins' level shifters: on (1.8 V) for the
-  // button on GPIO0, else off to save power.
+  // button (a header pin, trigger_config::kButtonPin), else off to save power.
   Wire1.begin();
   nicla::started = true;
   if (trigger_config::kEnableButton) {
