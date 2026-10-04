@@ -11,6 +11,9 @@
   let nextId = 2;
   let isSending = false;
   let chatContainer: HTMLElement;
+  let masonAudio: HTMLAudioElement | undefined;
+  let masonScareActive = false;
+  let masonScareTimeout: ReturnType<typeof setTimeout> | undefined;
 
   let messages: Message[] = [
     {
@@ -20,6 +23,34 @@
     }
   ];
 
+  function playMasonSound() {
+    masonAudio ??= new Audio('/mason-jumpscare.mp3');
+    masonAudio.currentTime = 0;
+    void masonAudio.play().catch((error: unknown) => {
+      console.warn('Could not play the Mason sound file:', error);
+    });
+  }
+
+  function triggerMasonScare() {
+    masonScareActive = true;
+    playMasonSound();
+    if (masonScareTimeout) clearTimeout(masonScareTimeout);
+    masonScareTimeout = setTimeout(() => {
+      masonScareActive = false;
+      masonScareTimeout = undefined;
+    }, 1000);
+  }
+
+  function dismissMasonScare() {
+    masonScareActive = false;
+    if (masonScareTimeout) clearTimeout(masonScareTimeout);
+    masonScareTimeout = undefined;
+  }
+
+  function handleWindowKeydown(event: KeyboardEvent) {
+    if (event.key === 'Escape' && masonScareActive) dismissMasonScare();
+  }
+
   async function sendMessage() {
     const text = input.trim();
 
@@ -28,6 +59,12 @@
     if (text.toLowerCase() === '/private' || text.toLowerCase() === '/open') {
       input = '';
       await goto('/private');
+      return;
+    }
+
+    if (text.toLowerCase() === '/mason') {
+      input = '';
+      triggerMasonScare();
       return;
     }
 
@@ -74,6 +111,8 @@
     chatContainer.scrollTop = chatContainer.scrollHeight;
   }
 </script>
+
+<svelte:window onkeydown={handleWindowKeydown} />
 
 <svelte:head>
   <title>Sending Stone</title>
@@ -144,3 +183,46 @@
     </form>
   </section>
 </main>
+
+{#if masonScareActive}
+  <div class="mason-scare" role="dialog" aria-modal="true" aria-label="Surprise!">
+    <img src="/mason-placeholder.png" alt="A silly spooky face popping up as a surprise" />
+    <button type="button" onclick={dismissMasonScare} aria-label="Dismiss surprise">×</button>
+  </div>
+{/if}
+
+<style>
+  .mason-scare {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+    background: #100d18;
+  }
+
+  .mason-scare img {
+    position: absolute;
+    width: min(82vw, 520px);
+    height: min(82vw, 520px);
+    object-fit: contain;
+  }
+
+  .mason-scare button {
+    position: absolute;
+    top: 1rem;
+    right: 1rem;
+    display: grid;
+    width: 2.75rem;
+    height: 2.75rem;
+    place-items: center;
+    border: 1px solid #ffffff66;
+    border-radius: 999px;
+    background: #ffffff22;
+    color: white;
+    font-size: 1.75rem;
+    cursor: pointer;
+  }
+
+</style>
