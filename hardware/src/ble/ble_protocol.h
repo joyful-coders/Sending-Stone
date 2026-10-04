@@ -23,6 +23,7 @@
  * Any change here must bump @c BLE_PROTOCOL_VERSION and update BLE_PROTOCOL.md
  * and the Python client.
  *
+ * 
  */
 
 #pragma once

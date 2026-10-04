@@ -10,7 +10,7 @@ The device records audio and motion continuously into a ~10 s rolling buffer. No
 
 1. The device notifies **EVENT_STARTED** immediately, so the client can alert right away.
 2. It keeps recording for 50 s after the trigger. Further triggers extend that, up to 3 minutes in total.
-3. It notifies **EVENT_READY**, and the event (the ~10 s before plus everything after) is stored on the device's flash until the client fetches and deletes it. Up to 16 events are kept; when full, the oldest is replaced.
+3. It notifies **EVENT_READY**, and the event (the ~10 s before plus everything after) is stored on the device's flash until the client fetches and deletes it. Up to 16 events are kept. The oldest are deleted when there are more, or when free space drops below what one full-length event needs (~2.4 MB), so the device can always record.
 
 Events wait on the device while no client is connected, so on every connect a client should send **LIST** and fetch anything pending.
 

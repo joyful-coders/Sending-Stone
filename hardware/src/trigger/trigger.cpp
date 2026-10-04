@@ -125,7 +125,7 @@ void startTriggerModule() {
         gyroThresholdSq = gyroCounts * gyroCounts;
         addImuSampleHandler(checkJolt);
     }
-    keywordThread.enabled = trigger_config::kEnableKeyword;
+    keywordThread.enabled = trigger_config::kEnableKeyword && startKeywordDetection();
 
     debug_logs::triggerLogging("Started triggers: keyword %s, jolt %s (%.1f g / %.0f dps).",
         trigger_config::kEnableKeyword ? "on" : "off", trigger_config::kEnableJolt ? "on" : "off",

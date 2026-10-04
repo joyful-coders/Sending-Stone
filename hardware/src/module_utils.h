@@ -48,6 +48,29 @@ inline void runIfDue(Thread& thread) {
 }
 
 /**
+ * @brief Read access to a library's private member, for the few places a library hides state we need.
+ *
+ * @details
+ * C++ skips access checks on names used in an explicit template
+ * instantiation. Declare a tag with the member pointer type and a friend
+ * @c get(), then instantiate this at global scope with the member:
+ *
+ * @code
+ * struct MyTag { typedef int Library::*type; friend type get(MyTag); };
+ * template struct PrivateAccess<MyTag, &Library::hiddenField>;
+ * int value = library.*get(MyTag());
+ * @endcode
+ *
+ * @tparam Tag The tag type naming the member.
+ * @tparam Member Pointer to the private member.
+ *
+ */
+template <typename Tag, typename Tag::type Member>
+struct PrivateAccess {
+    friend typename Tag::type get(Tag) { return Member; }
+};
+
+/**
  * @brief The newest reading a module has taken, and whether there is one yet.
  *
  * @tparam Reading The module's reading struct.

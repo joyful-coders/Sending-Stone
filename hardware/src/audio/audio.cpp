@@ -63,12 +63,6 @@ uint16_t soundLevel = 0;
 uint16_t chunksSinceLog = 0;
 /** @brief Chunks reported missed since the last status log. */
 uint16_t missedSinceLog = 0;
-/** @brief Microseconds spent reading from the NDP since the last status log. */
-uint32_t extractUsSinceLog = 0;
-/** @brief Microseconds spent in the chunk handler (recording) since the last status log. */
-uint32_t handlerUsSinceLog = 0;
-/** @brief Longest single chunk handler call, in microseconds, since the last status log. */
-uint32_t handlerMaxUsSinceLog = 0;
 
 /**
  * @brief RMS amplitude of a block of 16-bit samples.
@@ -97,10 +91,7 @@ uint16_t rmsLevel(const int16_t* samples, size_t count) {
  */
 bool extractOneChunk() {
     unsigned int len = 0;
-    uint32_t extractStart = micros();
-    int status = NDP.extractData(chunkBuffer, &len);
-    extractUsSinceLog += micros() - extractStart;
-    if (status || len < sizeof(int16_t)) return false;
+    if (NDP.extractData(chunkBuffer, &len) || len < sizeof(int16_t)) return false;
 
     uint8_t counter = chunkBuffer[len + kCounterOffset];
     uint8_t missed = 0;
@@ -127,13 +118,7 @@ bool extractOneChunk() {
     chunksSinceLog++;
     missedSinceLog += missed;
 
-    if (chunkHandler != nullptr) {
-        uint32_t handlerStart = micros();
-        chunkHandler(samples, count, missed, now);
-        uint32_t handlerUs = micros() - handlerStart;
-        handlerUsSinceLog += handlerUs;
-        if (handlerUs > handlerMaxUsSinceLog) handlerMaxUsSinceLog = handlerUs;
-    }
+    if (chunkHandler != nullptr) chunkHandler(samples, count, missed, now);
     return true;
 }
 
@@ -165,14 +150,9 @@ void audioTick() {
  *
  */
 void audioLogTick() {
-    debug_logs::audioLogging("%u chunks, %u missed, lvl %u; reads %lu ms, rec %lu ms (max %lu)",
-                             chunksSinceLog, missedSinceLog, soundLevel, extractUsSinceLog / 1000,
-                             handlerUsSinceLog / 1000, handlerMaxUsSinceLog / 1000);
+    debug_logs::audioLogging("%u chunks, %u missed, level %u", chunksSinceLog, missedSinceLog, soundLevel);
     chunksSinceLog = 0;
     missedSinceLog = 0;
-    extractUsSinceLog = 0;
-    handlerUsSinceLog = 0;
-    handlerMaxUsSinceLog = 0;
 }
 
 /** @brief Thread for extracting audio. */

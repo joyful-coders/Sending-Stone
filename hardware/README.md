@@ -9,7 +9,7 @@ Firmware for the [Arduino Nicla Voice](https://docs.arduino.cc/hardware/nicla-vo
   - **Keyword** recognized by the NDP120 (currently the stock model's "Alexa", as a stand-in)
   - **Jolt**: total acceleration >= 4 g or rotation >= 700 dps (starting guesses, tune with data)
   - **Manual**: the client's TRIGGER command (and later a button)
-- **Events:** a trigger keeps the pre-trigger buffer and records 50 s more; further triggers extend it (up to 3 min). Up to 16 events are stored, survive power loss, and wait for a client
+- **Events:** a trigger keeps the pre-trigger buffer and records 50 s more; further triggers extend it (up to 3 min). Up to 16 events are stored (fewer if they are long: the oldest are deleted to keep room for the next one), survive power loss, and wait for a client
 - **BLE store-and-forward:** an immediate EVENT_STARTED alert, then a resumable chunked download, see [BLE_PROTOCOL.md](BLE_PROTOCOL.md). The Python client in `../hardware-ble-test/` saves each event as WAV + CSV + JSON
 - **BMI270** at ±16 g / ±2000 dps so strikes aren't clipped
 - Normal builds carry no debug code: if a module fails to start, the device reboots after 10 s to retry (`main_config::kFailureRebootDelayMs`)
@@ -34,7 +34,7 @@ The IMU and microphone are not wired to the nRF52832 directly. They sit behind t
 - `src/ndp/` - loads the NDP120 firmware packages and reports keyword matches
 - `src/imu/` - samples the BMI270 at 50 Hz and hands each raw sample to its handlers
 - `src/audio/` - extracts every 16 kHz audio chunk from the NDP and tracks loudness
-- `src/recorder/` - the rolling buffer and event storage on flash (`event_format.h` is an event's byte format, `adpcm.h` the audio encoder)
+- `src/recorder/` - the rolling buffer and event storage on flash (`event_format.h` is an event's byte format, `adpcm.h` the audio encoder, `nor_flash.*` a fast driver for the external flash)
 - `src/trigger/` - keyword, jolt, and manual triggers
 - `src/ble/` - the GATT service and event transfer (`ble_protocol.h` is the command/message format)
 - `sketch.yaml` - Arduino CLI profile pinning the board, core, and library versions

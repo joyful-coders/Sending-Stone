@@ -27,7 +27,6 @@
 
 #include <Arduino.h>
 #include <Nicla_System.h>
-#include <malloc.h>
 
 #include "src/configs.h"
 #include "src/logger.h"
@@ -47,6 +46,28 @@ Thread logFlushThread = Thread([]() { debug_logs::flushLogs(); }, debug_config::
 #endif
 
 /**
+ * @brief Talk to the PMIC so its I2C watchdog doesn't reset its settings.
+ *
+ * @details
+ * The BQ25120A reverts its registers to defaults if nothing talks to it for
+ * ~50 s. nicla::begin() normally runs a thread for this; reading the status
+ * register (the same read that thread does) from the main loop is enough.
+ *
+ * @par Parameters
+ * None.
+ *
+ * @par Returns
+ * Nothing.
+ *
+ */
+void pingPmic() {
+  nicla::getOperatingStatus();
+}
+
+/** @brief Thread pinging the PMIC every @c main_config::kPmicPingIntervalMs, started in setup(). */
+Thread pmicPingThread = makeIdleThread(pingPmic, main_config::kPmicPingIntervalMs);
+
+/**
  * @brief Flush queued logs if the flush interval has elapsed (debug builds only).
  *
  * @par Parameters
@@ -62,32 +83,50 @@ void flushLogsIfDue() {
 #endif
 }
 
+#if NICLA_DEBUG
 /**
- * @brief Log the largest block that could be allocated right now, then flush the log (debug builds only).
+ * @brief Why the chip last reset, as the nRF52's RESETREAS register records it.
  *
  * @details
- * RAM is the tightest resource on this board: BLE alone needs one 13 KB
- * block. Logging the headroom after each setup step shows exactly where it
- * goes. Flushing between steps also keeps the small log queue from dropping
- * setup messages.
+ * The register accumulates until cleared, so it's cleared after reading.
+ * No bits set means power-on (or a power dip): a crash would show as a
+ * software reset (mbed's error handler resets the chip) or a lockup.
  *
- * @param step Name of the step just completed.
+ * @return A short description.
+ *
+ */
+const char* readResetReason() {
+  uint32_t reason = NRF_POWER->RESETREAS;
+  NRF_POWER->RESETREAS = reason; // write 1s to clear
+  if (reason & POWER_RESETREAS_LOCKUP_Msk) return "CPU lockup (crash)";
+  if (reason & POWER_RESETREAS_DOG_Msk) return "watchdog";
+  if (reason & POWER_RESETREAS_SREQ_Msk) return "software reset (crash report or failure reboot)";
+  if (reason & POWER_RESETREAS_RESETPIN_Msk) return "reset pin or button";
+  if (reason != 0) return "debugger or wake-up";
+  return "power-on or power dip";
+}
+
+#endif
+
+/**
+ * @brief Grow the heap to its full size up front.
+ *
+ * @details
+ * The C library grows the heap on demand, in page-sized steps. Near the end
+ * of RAM a whole step may not fit even when the memory BLE asks for does, so
+ * BLE's one 13 KB allocation can fail with memory to spare (the
+ * "_stack_buffer != NULL" crash). Allocating the largest block that fits once
+ * and freeing it makes the heap claim all of its memory now; later
+ * allocations then come from that free space without growing the heap.
+ *
+ * @par Parameters
+ * None.
  *
  * @par Returns
  * Nothing.
  *
  */
-#if NICLA_DEBUG
-/** @brief Heap state at one point in setup. */
-struct HeapSnapshot {
-  size_t largest; ///< largest block malloc could return
-  size_t inUse;   ///< bytes currently allocated
-  size_t arena;   ///< bytes the heap has grown to so far
-};
-
-/** @brief Measure the heap right now. */
-HeapSnapshot takeHeapSnapshot() {
-  struct mallinfo info = mallinfo();  // before the probe, which would grow the arena
+void claimWholeHeap() {
   size_t low = 0, high = 64 * 1024;
   while (low < high) {  // binary search for the largest malloc that succeeds
     size_t mid = (low + high + 1) / 2;
@@ -99,23 +138,6 @@ HeapSnapshot takeHeapSnapshot() {
       high = mid - 1;
     }
   }
-  return {low, static_cast<size_t>(info.uordblks), static_cast<size_t>(info.arena)};
-}
-
-/** @brief Log a snapshot taken after @p step. */
-void logHeapSnapshot(const char* step, const HeapSnapshot& heap) {
-  debug_logs::mainLogging("After %s: largest free %u B, in use %u B, arena %u B.",
-                          step, heap.largest, heap.inUse, heap.arena);
-  debug_logs::flushLogs();
-}
-#endif
-
-void reportMemory(const char* step) {
-#if NICLA_DEBUG
-  logHeapSnapshot(step, takeHeapSnapshot());
-#else
-  (void)step;
-#endif
 }
 
 /**
@@ -150,8 +172,7 @@ void settleStdioAllocations() {
  *
  */
 BlinkState startModules() {
-  reportMemory("status LED");
-
+  // Logs are flushed after each step: the log queue is small, and setup is long.
   // The heap is only ~21 KB, and BLE keeps ~15 KB of it once started (one
   // 13 KB block plus its buffers), which leaves too little for the NDP firmware
   // load's file buffers. So the NDP loads first (it takes ~13 s): its buffers
@@ -159,12 +180,12 @@ BlinkState startModules() {
   // for BLE's block (see settleStdioAllocations()). The IMU and microphone
   // sit behind the NDP.
   if (!startNDPModule()) return BlinkState::NDPFail;
-  reportMemory("NDP");
+  debug_logs::flushLogs();
   if (!startBLEModule()) return BlinkState::BLEFail;
-  reportMemory("BLE");
+  debug_logs::flushLogs();
   if (!startIMUModule()) return BlinkState::IMUFail;
   if (!startAudioModule()) return BlinkState::AudioFail;
-  reportMemory("IMU + audio");
+  debug_logs::flushLogs();
 
   // The recorder mounts the flash the NDP library has just released.
   if (!startRecorder()) return BlinkState::StorageFail;
@@ -172,16 +193,18 @@ BlinkState startModules() {
   setAudioChunkHandler(recordAudioChunk);
   setEventHandlers(notifyEventStarted, notifyEventReady);
   startTriggerModule();
-  reportMemory("recorder + triggers");
+  debug_logs::flushLogs();
   return BlinkState::Idle;
 }
 }
 
 void setup() {
 #if NICLA_DEBUG
-  // Heap use before anything runs (static constructors), logged once Serial is up.
-  HeapSnapshot heapAtStart = takeHeapSnapshot();
+  // Why the last run ended (a crash, a power dip, ...), logged once Serial is up.
+  const char* resetReason = readResetReason();
 #endif
+  // Heap setup for BLE's 13 KB block, before anything else allocates.
+  claimWholeHeap();
   settleStdioAllocations();
 
   // Serial carries the debug log, so it's only started in debug builds. Don't
@@ -191,26 +214,24 @@ void setup() {
     unsigned long serialStart = millis();
     while (!Serial && millis() - serialStart < debug_config::kSerialWaitTimeoutMs) delay(10);
   }
-#if NICLA_DEBUG
-  HeapSnapshot heapAfterSerial = takeHeapSnapshot();
-#endif
 
-  // Power management and the I2C bus the LED driver and PMIC share. The header
-  // pins' LDO is unused (no external hardware), so it's turned off to save power.
-  nicla::begin();
+  // The I2C bus the LED driver and PMIC share. nicla::begin() isn't used: it
+  // also starts a thread whose 768-byte stack comes off the heap, and BLE
+  // needs every byte (see startModules()). pingPmic() replaces that thread.
+  // The header pins' LDO is unused (no external hardware), so it's turned off
+  // to save power.
+  Wire1.begin();
+  nicla::started = true;
   nicla::disableLDO();
-#if NICLA_DEBUG
-  HeapSnapshot heapAfterNicla = takeHeapSnapshot();
-#endif
+  pmicPingThread.enabled = true;
 
   // The status LED (debug builds) runs on its own thread, indicating state without blocking other operations.
   startStatusLED();
   setStatusState(BlinkState::Setup);
   updateStatusLED();
 #if NICLA_DEBUG
-  logHeapSnapshot("static init", heapAtStart);
-  logHeapSnapshot("Serial", heapAfterSerial);
-  logHeapSnapshot("nicla::begin", heapAfterNicla);
+  debug_logs::mainLogging("Reset reason: %s.", resetReason);
+  debug_logs::flushLogs();
 #endif
 
   BlinkState result = startModules();
@@ -218,6 +239,7 @@ void setup() {
 
   unsigned long failedAt = millis();
   while (inFailedState()) {
+    runIfDue(pmicPingThread);
     updateStatusLED();
     flushLogsIfDue();
     if (!debug_config::kDebugBuild && millis() - failedAt >= main_config::kFailureRebootDelayMs) {
@@ -230,6 +252,7 @@ void setup() {
 }
 
 void loop() {
+  runIfDue(pmicPingThread);
   updateStatusLED();
   updateAudioModule();
   updateIMUModule();

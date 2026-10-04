@@ -42,12 +42,24 @@ bool startNDPModule();
 bool isNDPReady();
 
 /**
+ * @brief Have the NDP start reporting keyword matches.
+ *
+ * @details
+ * Call after the microphone is on (startAudioModule()), as Arduino's own
+ * keyword example does. Any match from before is discarded.
+ *
+ * @return Whether it started.
+ *
+ */
+bool startKeywordDetection();
+
+/**
  * @brief Take the oldest keyword match the NDP has reported, if any, without blocking.
  *
  * @details
  * Must be called from the main loop (the same thread as every other NDP and
- * flash access). Matches are queued inside the NDP driver, so none are lost
- * between calls, even while audio is being extracted.
+ * flash access). Matches are counted inside the NDP driver, so one that
+ * arrives while audio is being extracted is still picked up on the next call.
  *
  * @param label If not null, receives the matched class's label from the model (e.g. "NN0:alexa").
  *

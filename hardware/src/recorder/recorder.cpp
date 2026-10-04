@@ -17,10 +17,14 @@
  *   event's header is @c m.bin, written at the start and again (with final
  *   sizes) at the end.
  *
+ * Events are deleted (by the client, or oldest first when there are too many
+ * or free space drops below @c recorder_config::kReservedFlashBytes) in the
+ * background, one file per updateRecorder() call, so recording never stalls.
+ *
  * Records are written straight to the file with mbed's @c File API (no stdio
  * buffers, and no extra RAM buffer: LittleFS already caches each file's
- * writes in 64-byte program units). RAM is tight on this chip, see README.md. Everything runs on the main
- * loop, which is also the only thread that touches the NDP, so flash and NDP
+ * writes in @c recorder_config::kFlashProgramBytes units). RAM is tight on
+ * this chip, see README.md. Everything runs on the main loop, which is also the only thread that touches the NDP, so flash and NDP
  * traffic on the shared SPI bus never interleave.
  *
  * Byte formats are in event_format.h.
@@ -28,7 +32,6 @@
  */
 
 #include <Arduino.h>
-#include <SPIFBlockDevice.h>
 #include <LittleFileSystem.h>
 #include <File.h>
 #include <Dir.h>
@@ -38,6 +41,7 @@
 
 #include "recorder.h"
 #include "adpcm.h"
+#include "nor_flash.h"
 #include "../configs.h"
 #include "../logger.h"
 
@@ -63,8 +67,15 @@ constexpr uint16_t kAudioRateHz = 16000;
 /** @brief Size of path buffers: fits "ev/65535/s65535.bin" with room to spare. */
 constexpr size_t kPathBytes = 32;
 
-/** @brief The external flash (same chip and pins as the NDP library's, which it releases after loading). */
-SPIFBlockDevice flash(SPI_PSELMOSI0, SPI_PSELMISO0, SPI_PSELSCK0, CS_FLASH, 16000000);
+/**
+ * @brief The external flash (same chip and pins as the NDP library's, which it releases after loading).
+ *
+ * @details
+ * Our own driver rather than the core's SPIFBlockDevice, which is ~15x slower
+ * at writing (see nor_flash.h).
+ *
+ */
+NorFlash flash(SPI_PSELMOSI0, SPI_PSELMISO0, SPI_PSELSCK0, CS_FLASH, 16000000);
 /**
  * @brief The flash's filesystem, mounted under @c kMountName.
  *
@@ -120,6 +131,20 @@ uint32_t captureEndMs = 0;
 uint16_t nextEventId = 1;
 EventStartedHandler startedHandler = nullptr;
 EventReadyHandler readyHandler = nullptr;
+/** @} */
+
+/**
+ * @defgroup Deletion
+ * Events whose files are being removed in the background, one file per
+ * updateRecorder() call: removing an event's ~30 files at once blocks for
+ * ~1.5 s, long enough for the NDP's audio buffer to overflow.
+ * @{
+ */
+constexpr uint8_t kMaxPendingDeletes = 4;
+uint16_t pendingDeletes[kMaxPendingDeletes]; ///< oldest first
+uint32_t pendingDeleteBytes[kMaxPendingDeletes]; ///< each one's size, freed once it's removed
+uint8_t pendingDeleteCount = 0;
+uint16_t pendingDeleteSegment = 0;            ///< next segment of pendingDeletes[0] to remove
 /** @} */
 
 /**
@@ -358,6 +383,80 @@ bool removeEventFiles(uint16_t id) {
 }
 
 /**
+ * @brief Whether an event is waiting for (or in the middle of) background deletion.
+ *
+ * @param id Event id.
+ *
+ * @return Whether it's queued.
+ *
+ */
+bool isPendingDelete(uint16_t id) {
+    for (uint8_t i = 0; i < pendingDeleteCount; ++i) {
+        if (pendingDeletes[i] == id) return true;
+    }
+    return false;
+}
+
+/**
+ * @brief Delete an event: remove its header now, and its other files in the background.
+ *
+ * @details
+ * Without its header the event no longer lists or reads, so it's gone as far
+ * as clients are concerned. A power loss before the rest is removed leaves a
+ * header-less directory, which startRecorder() queues again. If the queue is
+ * full the files are removed right away instead.
+ *
+ * @param id Event id.
+ *
+ * @return Whether it was deleted or queued.
+ *
+ */
+bool queueEventDelete(uint16_t id) {
+    if (isPendingDelete(id)) return true;
+    EventMeta header;
+    uint32_t bytes = readMeta(id, header) ? kMetaBytes + header.dataBytes : 0;
+    char path[kPathBytes];
+    metaPath(id, path, sizeof(path));
+    fs.remove(path);
+    if (pendingDeleteCount == kMaxPendingDeletes) return removeEventFiles(id);
+    pendingDeleteBytes[pendingDeleteCount] = bytes;
+    pendingDeletes[pendingDeleteCount++] = id;
+    return true;
+}
+
+/**
+ * @brief Remove one file of the oldest event queued for deletion, or its directory once it's empty.
+ *
+ * @par Returns
+ * Nothing.
+ *
+ */
+void stepPendingDelete() {
+    if (pendingDeleteCount == 0) return;
+    uint16_t id = pendingDeletes[0];
+    char path[kPathBytes];
+
+    if (pendingDeleteSegment < kMaxSegments) {
+        segmentPath(id, pendingDeleteSegment, path, sizeof(path));
+        bool removed = fs.remove(path) == 0;
+        pendingDeleteSegment++;
+        if (removed) return;
+        // Missing: either the end, or a gap (a lost segment). Keep going only if the next one exists.
+        segmentPath(id, pendingDeleteSegment, path, sizeof(path));
+        if (fileSize(path) >= 0) return;
+    }
+
+    eventDirPath(id, path, sizeof(path));
+    fs.remove(path);
+    for (uint8_t i = 1; i < pendingDeleteCount; ++i) {
+        pendingDeletes[i - 1] = pendingDeletes[i];
+        pendingDeleteBytes[i - 1] = pendingDeleteBytes[i];
+    }
+    pendingDeleteCount--;
+    pendingDeleteSegment = 0;
+}
+
+/**
  * @brief Finish an event left incomplete by a power loss: count its segments and mark it complete.
  *
  * @param id Event id.
@@ -388,23 +487,65 @@ void repairEvent(uint16_t id) {
 }
 
 /**
- * @brief Delete the oldest events until at most @c kMaxEvents remain.
+ * @brief Free space on the flash, counting events still being deleted as free.
+ *
+ * @details
+ * LittleFS works this out by walking every file's blocks, so it takes a
+ * moment; it's only called after an event and at startup.
+ *
+ * @return Free bytes, or -1 if the filesystem can't tell.
+ *
+ */
+int64_t freeFlashBytes() {
+    struct statvfs info;
+    if (fs.statvfs("", &info)) return -1;
+    int64_t bytes = static_cast<int64_t>(info.f_bfree) * info.f_bsize;
+    for (uint8_t i = 0; i < pendingDeleteCount; ++i) bytes += pendingDeleteBytes[i];
+    return bytes;
+}
+
+/**
+ * @brief Delete the oldest events until at most @c kMaxEvents remain and @c kReservedFlashBytes is free.
+ *
+ * @details
+ * Never deletes the event being recorded. Deleting the event being
+ * transferred ends that transfer.
  *
  * @par Returns
  * Nothing.
  *
  */
-void enforceMaxEvents() {
-    uint16_t ids[kMaxEvents + 2];
-    uint16_t found = scanEventIds(ids, kMaxEvents + 2);
-    uint16_t stored = found < kMaxEvents + 2 ? found : kMaxEvents + 2;
-    uint16_t excess = found > kMaxEvents ? found - kMaxEvents : 0;
+void enforceStorageLimits() {
+    uint16_t ids[kMaxEvents + 2 + kMaxPendingDeletes];
+    uint16_t capacity = sizeof(ids) / sizeof(ids[0]);
+    uint16_t found = scanEventIds(ids, capacity);
+    uint16_t stored = found < capacity ? found : capacity;
+    // Events already being deleted still have directories, but don't count.
+    uint16_t live = found;
+    for (uint16_t i = 0; i < stored; ++i) {
+        if (isPendingDelete(ids[i])) live--;
+    }
+    uint16_t excess = live > kMaxEvents ? live - kMaxEvents : 0;
     for (uint16_t i = 0; excess > 0 && i < stored; ++i) {
+        if (isPendingDelete(ids[i])) continue;
         if (capturing && ids[i] == meta.eventId) continue;
         if (reading && ids[i] == readId) endEventRead();
-        removeEventFiles(ids[i]);
+        queueEventDelete(ids[i]);
         excess--;
-        debug_logs::recorderLogging("Storage full, deleted oldest event %u.", ids[i]);
+        debug_logs::recorderLogging("Too many events, deleted oldest event %u.", ids[i]);
+    }
+
+    int64_t freeBytes = freeFlashBytes();
+    for (uint16_t i = 0; freeBytes >= 0 && freeBytes < static_cast<int64_t>(kReservedFlashBytes) && i < stored; ++i) {
+        if (isPendingDelete(ids[i])) continue;
+        if (capturing && ids[i] == meta.eventId) continue;
+        if (reading && ids[i] == readId) endEventRead();
+        EventMeta header;
+        uint32_t bytes = readMeta(ids[i], header) ? kMetaBytes + header.dataBytes : 0;
+        queueEventDelete(ids[i]);
+        freeBytes += bytes;
+        debug_logs::recorderLogging("Low on space, deleted oldest event %u (%lu KB).", ids[i],
+                                    static_cast<unsigned long>(bytes / 1024));
     }
 }
 
@@ -505,7 +646,7 @@ void finishEvent(uint32_t now) {
         static_cast<unsigned long>(eventDataBytes), saved ? "" : " (header write FAILED)");
     if (readyHandler != nullptr) readyHandler(meta.eventId, kMetaBytes + eventDataBytes, static_cast<TriggerType>(meta.triggerType));
 
-    enforceMaxEvents();
+    enforceStorageLimits();
     ringHead = 0;
     ringCount = 0;
     openRingSlot();
@@ -519,13 +660,6 @@ void finishEvent(uint32_t now) {
  *
  */
 void rotateSegment() {
-#if NICLA_DEBUG
-    // Time each switch: file create/close/delete are the filesystem's slowest operations.
-    struct SwitchTimer {
-        uint32_t start = millis();
-        ~SwitchTimer() { debug_logs::recorderLogging("Segment switch: %lu ms.", millis() - start); }
-    } timer;
-#endif
     if (capturing) {
         if (segmentCount >= kMaxSegments) {
             finishEvent(millis());
@@ -596,14 +730,22 @@ bool startRecorder() {
     uint16_t ids[kMaxEvents + 2];
     uint16_t found = scanEventIds(ids, kMaxEvents + 2);
     uint16_t stored = found < kMaxEvents + 2 ? found : kMaxEvents + 2;
-    for (uint16_t i = 0; i < stored; ++i) repairEvent(ids[i]);
+    for (uint16_t i = 0; i < stored; ++i) {
+        // No header: a delete was cut short by a power loss. Finish it.
+        metaPath(ids[i], path, sizeof(path));
+        if (fileSize(path) < 0) {
+            queueEventDelete(ids[i]);
+            continue;
+        }
+        repairEvent(ids[i]);
+    }
     if (stored > 0) nextEventId = ids[stored - 1] == 65535 ? 1 : ids[stored - 1] + 1;
-    enforceMaxEvents();
+    enforceStorageLimits();
 
     if (!openRingSlot()) return false;
     running = true;
-    debug_logs::recorderLogging("Started recorder: %u stored events, %u ring slots of %lu ms.",
-        stored, kRingSlots, kSegmentMs);
+    debug_logs::recorderLogging("Started recorder: %u stored events, %u ring slots of %lu ms, %ld KB free.",
+        stored, kRingSlots, kSegmentMs, static_cast<long>(freeFlashBytes() / 1024));
     return true;
 }
 
@@ -615,7 +757,11 @@ void updateRecorder() {
         finishEvent(now);
         return;
     }
-    if (segmentOpen && now - segmentStartMs >= kSegmentMs) rotateSegment();
+    if (segmentOpen && now - segmentStartMs >= kSegmentMs) {
+        rotateSegment();
+        return; // one slow flash operation per call
+    }
+    stepPendingDelete();
 }
 
 void recordAudioChunk(const int16_t* samples, size_t count, uint8_t missedChunks, uint32_t timestampMs) {
@@ -713,9 +859,12 @@ uint8_t listEvents(EventInfo* out, uint8_t maxEvents) {
 }
 
 bool deleteEvent(uint16_t id) {
-    if (!running || (capturing && id == meta.eventId)) return false;
+    if (!running || (capturing && id == meta.eventId) || isPendingDelete(id)) return false;
+    char path[kPathBytes];
+    metaPath(id, path, sizeof(path));
+    if (fileSize(path) < 0) return false; // no such event
     if (reading && id == readId) endEventRead();
-    return removeEventFiles(id);
+    return queueEventDelete(id);
 }
 
 bool beginEventRead(uint16_t id, uint32_t& totalBytes) {
@@ -723,16 +872,11 @@ bool beginEventRead(uint16_t id, uint32_t& totalBytes) {
     if (!running || (capturing && id == meta.eventId)) return false;
     if (!readMeta(id, readHeader) || !readHeader.complete) return false;
 
-    // Total the segments' sizes (they're re-read file by file as the transfer goes).
-    char path[kPathBytes];
-    totalBytes = kMetaBytes;
-    for (uint16_t i = 0; i < readHeader.segmentCount && i < kMaxSegments; ++i) {
-        segmentPath(id, i, path, sizeof(path));
-        long size = fileSize(path);
-        if (size > 0) totalBytes += static_cast<uint32_t>(size);
-    }
-    // The header sent is the stored one, with dataBytes matching what will actually be sent.
-    readHeader.dataBytes = totalBytes - kMetaBytes;
+    // The header's dataBytes is the segments' total size (written from the
+    // actual file sizes when the event finished, or by repairEvent()).
+    // Looking up each segment instead blocked for seconds on a long event
+    // (one directory search per file), long enough to drop audio.
+    totalBytes = kMetaBytes + readHeader.dataBytes;
 
     readId = id;
     reading = true;

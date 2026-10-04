@@ -35,6 +35,9 @@ namespace main_config {
 /** @brief Delay, in milliseconds, between successive loop() iterations. */
 constexpr uint8_t kRefreshIntervalMs = 2;
 
+/** @brief Interval, in milliseconds, between PMIC pings (its I2C watchdog resets its settings after ~50 s of silence). */
+constexpr unsigned long kPmicPingIntervalMs = 1UL * 10UL * 1000UL; // 10 seconds
+
 /**
  * @brief How long, in milliseconds, a normal build waits after a module fails to start before rebooting to retry.
  *
@@ -144,12 +147,29 @@ constexpr unsigned long kMaxEventMs = 3UL * 60UL * 1000UL; // 3 minutes
  * @brief Maximum events kept on the flash.
  *
  * @details
- * Each 60 s event is ~0.55 MB, so 16 events use ~9 MB of the 16 MB flash,
- * leaving room for the NDP firmware and the rolling buffer. When full, the
- * oldest event is deleted to make room.
+ * Events are also deleted, oldest first, whenever free space drops below
+ * @c kReservedFlashBytes, so long events hit that limit first: a 60 s event
+ * is ~0.6 MB, a full-length one ~1.9 MB, and the 16 MB flash also holds the
+ * NDP firmware and the rolling buffer.
  *
  */
 constexpr uint8_t kMaxEvents = 16;
+
+/** @brief Recording size per second, in bytes, rounded up (measured ~9.6 KB: ADPCM audio plus motion). */
+constexpr uint32_t kBytesPerSecond = 10000;
+
+/**
+ * @brief Flash kept free for the next event, in bytes.
+ *
+ * @details
+ * Room for one full-length event (pre-trigger plus @c kMaxEventMs) plus a
+ * 512 KB margin for the rolling buffer and the filesystem's own blocks.
+ * Without it, undownloaded events could fill the flash, and then nothing
+ * (not even the rolling buffer) could be recorded. After each event, and at
+ * startup, the oldest events are deleted until this much is free.
+ *
+ */
+constexpr uint32_t kReservedFlashBytes = (kPreTriggerMs + kMaxEventMs) / 1000UL * kBytesPerSecond + 512UL * 1024UL;
 
 /** @brief Motion samples buffered per motion record. 10 samples = 0.2 s at 50 Hz (kept small: RAM is tight). */
 constexpr uint8_t kMotionSamplesPerRecord = 10;
@@ -213,8 +233,37 @@ constexpr char kDataCharUuid[] = "40d3f957-dded-4b7d-9eb2-f11db97dda09";
 /** @brief Largest data notification, in bytes. Clients ask for less if their MTU is smaller. */
 constexpr uint16_t kMaxDataNotifyBytes = 240;
 
-/** @brief Data chunks sent per loop pass during a transfer. Each can block until the radio frees a buffer. */
-constexpr uint8_t kChunksPerLoop = 2;
+/**
+ * @brief Connection interval range requested while a transfer runs, in units of 1.25 ms.
+ *
+ * @details
+ * The interval is how often the radio exchanges packets. Short means fast
+ * transfers but more power, so it's only requested during transfers. The
+ * client has the final say (Windows usually allows down to ~7.5-15 ms).
+ *
+ */
+constexpr uint16_t kTransferIntervalMin = 6;  // 7.5 ms
+/** @brief See @c kTransferIntervalMin. */
+constexpr uint16_t kTransferIntervalMax = 12; // 15 ms
+/** @brief Connection interval range requested when idle, in units of 1.25 ms. Longer saves power. */
+constexpr uint16_t kIdleIntervalMin = 24;     // 30 ms
+/** @brief See @c kIdleIntervalMin. */
+constexpr uint16_t kIdleIntervalMax = 40;     // 50 ms
+/** @brief Connection supervision timeout requested with either range, in units of 10 ms. */
+constexpr uint16_t kSupervisionTimeout = 400; // 4 s
+
+/** @brief Most data chunks sent per loop pass during a transfer. */
+constexpr uint8_t kChunksPerLoop = 4;
+
+/**
+ * @brief Longest, in microseconds, a transfer waits per loop pass for the radio to free a buffer.
+ *
+ * @details
+ * Longer means faster transfers but less loop time for audio. Audio needs
+ * ~55% of the loop, so a few ms per pass is safe.
+ *
+ */
+constexpr uint32_t kTransferBudgetUs = 4000;
 
 } // namespace ble_config
 
@@ -244,6 +293,8 @@ constexpr const char* kLEDPrefix = "[LED]";
 
 /** @brief Enables NDP module log messages. */
 constexpr bool kEnableNDPLogging = true && kEnableVerboseLogging;
+/** @brief Interval, in milliseconds, between keyword statistics logs (matches reported vs taken). */
+constexpr unsigned long kKeywordStatsDelay = 1UL * 5UL * 1000UL; // 5 seconds
 /** @brief Prefix prepended to NDP module log messages. */
 constexpr const char* kNDPPrefix = "[NDP]";
 
