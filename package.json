@@ -5,7 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite dev",
-    "build": "vite build",
+    "build": "node scripts/build-apps.mjs",
+    "build:windows": "node scripts/build-apps.mjs windows",
+    "build:android": "node scripts/build-apps.mjs android",
+    "build:web": "vite build",
     "preview": "vite preview",
     "prepare": "svelte-kit sync || echo ''",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",

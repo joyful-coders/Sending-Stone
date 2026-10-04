@@ -6,7 +6,7 @@
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm run build",
+    "beforeBuildCommand": "npm run build:web",
     "frontendDist": "../build"
   },
   "app": {
@@ -23,6 +23,9 @@
   },
   "bundle": {
     "active": true,
+    "android": {
+      "minSdkVersion": 26
+    },
     "targets": "all",
     "icon": [
       "icons/32x32.png",

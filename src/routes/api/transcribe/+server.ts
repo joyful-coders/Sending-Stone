@@ -1,11 +1,13 @@
 // src/routes/api/transcribe/+server.ts
 import { json, error } from '@sveltejs/kit';
 import { ElevenLabsClient } from '@elevenlabs/elevenlabs-js';
-import { ELEVENLABS_API_KEY } from '$env/static/private';
-
-const client = new ElevenLabsClient({ apiKey: ELEVENLABS_API_KEY });
+import { env } from '$env/dynamic/private';
 
 export async function POST({ request }) {
+  // Read per request, not at build time, so the app builds without the key.
+  if (!env.ELEVENLABS_API_KEY) throw error(503, 'ELEVENLABS_API_KEY is not set (.env).');
+  const client = new ElevenLabsClient({ apiKey: env.ELEVENLABS_API_KEY });
+
   const contentType = request.headers.get('content-type') ?? 'audio/mpeg';
   const bytes = await request.arrayBuffer();
 

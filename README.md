@@ -12,7 +12,20 @@ The app talks to the wrist-worn recorder in [`hardware/`](hardware/) over BLE (p
 
 Code: [`src/lib/watch/`](src/lib/watch/) (`protocol.ts` the BLE protocol, `eventFormat.ts` decoding, `transport.ts` native/web BLE, `storage.ts` saving, `watchClient.svelte.ts` the connection).
 
-Build the APK with `npm run tauri android build` (needs the Android SDK/NDK and Rust Android targets, see the [Tauri Android prerequisites](https://v2.tauri.app/start/prerequisites/#android)). The plugin adds the Bluetooth permissions; the app asks for them the first time it searches.
+The plugin adds the Bluetooth permissions; the app asks for them the first time it searches.
+
+## Building
+
+```bash
+npm run build           # Windows app + Android APK, collected in release/
+npm run build:windows   # release/untitled.exe (runs as is) and the installer
+npm run build:android   # release/untitled-android.apk (debug-signed: installs on any phone for testing)
+npm run build:web       # just the web files (build/), which Tauri packages
+```
+
+Android needs Android Studio's SDK and NDK, with `ANDROID_HOME`, `NDK_HOME` and `JAVA_HOME` set ([Tauri Android prerequisites](https://v2.tauri.app/start/prerequisites/#android)); without them the script still builds Windows and says what's missing. The Rust Android targets are added automatically.
+
+The `api/` routes (SMS, transcription) read their keys from `.env` when called. They only run under `npm run dev`; the built apps have no server.
 
 ## Recommended IDE Setup
 

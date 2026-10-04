@@ -12,6 +12,7 @@ vite.config.ts.timestamp-*
 # Tauri / Rust build output
 src-tauri/target/
 target/
+release/
 
 # Android / Gradle local and build output
 .gradle/
