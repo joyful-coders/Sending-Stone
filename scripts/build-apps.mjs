@@ -1,7 +1,7 @@
 // Builds the app for testing and collects the results in release/:
-//   release/untitled.exe              Windows app (runs without installing)
-//   release/untitled_*_setup.exe      Windows installer
-//   release/untitled-android.apk      Android app for 64-bit ARM phones (optimized, signed with
+//   release/sending-stone.exe         Windows app (runs without installing)
+//   release/Sending Stone_*-setup.exe  Windows installer
+//   release/sending-stone.apk         Android app for 64-bit ARM phones (optimized, signed with
 //                                     the Android debug key: installs on any phone with
 //                                     "install unknown apps" allowed)
 //
@@ -51,7 +51,7 @@ function collect(from, name) {
 function buildWindows() {
   run('npx tauri build');
   const target = join(root, 'src-tauri', 'target', 'release');
-  collect(join(target, 'untitled.exe'), 'untitled.exe');
+  collect(join(target, 'sending-stone.exe'), 'sending-stone.exe');
   const installer = newest(join(target, 'bundle', 'nsis'), /setup\.exe$/i);
   if (installer) collect(installer, installer.split(/[\\/]/).pop());
 }
@@ -101,12 +101,12 @@ function buildAndroid() {
     );
   }
   mkdirSync(releaseDir, { recursive: true });
-  const out = join(releaseDir, 'untitled-android.apk');
+  const out = join(releaseDir, 'sending-stone.apk');
   run(
     `"${apksigner}" sign --ks "${keystore}" --ks-pass pass:android --ks-key-alias androiddebugkey ` +
       `--key-pass pass:android --out "${out}" "${unsigned}"`
   );
-  console.log('  -> release/untitled-android.apk');
+  console.log('  -> release/sending-stone.apk');
 }
 
 try {
